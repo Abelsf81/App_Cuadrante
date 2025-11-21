@@ -15,28 +15,28 @@ ROLES = ["Mando", "Conductor", "Bombero"]
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# Plantilla por defecto
+# Plantilla por defecto con ID_Puesto (Fijo) y Nombre (Editable)
 DEFAULT_ROSTER = [
-    {"Nombre": "Jefe A", "Turno": "A", "Rol": "Mando", "SV": False},
-    {"Nombre": "Subjefe A", "Turno": "A", "Rol": "Mando", "SV": False},
-    {"Nombre": "Cond A", "Turno": "A", "Rol": "Conductor", "SV": True},
-    {"Nombre": "Bombero A1", "Turno": "A", "Rol": "Bombero", "SV": True},
-    {"Nombre": "Bombero A2", "Turno": "A", "Rol": "Bombero", "SV": False},
-    {"Nombre": "Bombero A3", "Turno": "A", "Rol": "Bombero", "SV": False},
+    {"ID_Puesto": "Jefe A",      "Nombre": "Jefe A",      "Turno": "A", "Rol": "Mando",     "SV": False},
+    {"ID_Puesto": "Subjefe A",   "Nombre": "Subjefe A",   "Turno": "A", "Rol": "Mando",     "SV": False},
+    {"ID_Puesto": "Cond A",      "Nombre": "Cond A",      "Turno": "A", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Bombero A1",  "Nombre": "Bombero A1",  "Turno": "A", "Rol": "Bombero",   "SV": True},
+    {"ID_Puesto": "Bombero A2",  "Nombre": "Bombero A2",  "Turno": "A", "Rol": "Bombero",   "SV": False},
+    {"ID_Puesto": "Bombero A3",  "Nombre": "Bombero A3",  "Turno": "A", "Rol": "Bombero",   "SV": False},
     
-    {"Nombre": "Jefe B", "Turno": "B", "Rol": "Mando", "SV": False},
-    {"Nombre": "Subjefe B", "Turno": "B", "Rol": "Mando", "SV": False},
-    {"Nombre": "Cond B", "Turno": "B", "Rol": "Conductor", "SV": True},
-    {"Nombre": "Bombero B1", "Turno": "B", "Rol": "Bombero", "SV": True},
-    {"Nombre": "Bombero B2", "Turno": "B", "Rol": "Bombero", "SV": False},
-    {"Nombre": "Bombero B3", "Turno": "B", "Rol": "Bombero", "SV": False},
+    {"ID_Puesto": "Jefe B",      "Nombre": "Jefe B",      "Turno": "B", "Rol": "Mando",     "SV": False},
+    {"ID_Puesto": "Subjefe B",   "Nombre": "Subjefe B",   "Turno": "B", "Rol": "Mando",     "SV": False},
+    {"ID_Puesto": "Cond B",      "Nombre": "Cond B",      "Turno": "B", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Bombero B1",  "Nombre": "Bombero B1",  "Turno": "B", "Rol": "Bombero",   "SV": True},
+    {"ID_Puesto": "Bombero B2",  "Nombre": "Bombero B2",  "Turno": "B", "Rol": "Bombero",   "SV": False},
+    {"ID_Puesto": "Bombero B3",  "Nombre": "Bombero B3",  "Turno": "B", "Rol": "Bombero",   "SV": False},
 
-    {"Nombre": "Jefe C", "Turno": "C", "Rol": "Mando", "SV": False},
-    {"Nombre": "Subjefe C", "Turno": "C", "Rol": "Mando", "SV": False},
-    {"Nombre": "Cond C", "Turno": "C", "Rol": "Conductor", "SV": True},
-    {"Nombre": "Bombero C1", "Turno": "C", "Rol": "Bombero", "SV": True},
-    {"Nombre": "Bombero C2", "Turno": "C", "Rol": "Bombero", "SV": False},
-    {"Nombre": "Bombero C3", "Turno": "C", "Rol": "Bombero", "SV": False},
+    {"ID_Puesto": "Jefe C",      "Nombre": "Jefe C",      "Turno": "C", "Rol": "Mando",     "SV": False},
+    {"ID_Puesto": "Subjefe C",   "Nombre": "Subjefe C",   "Turno": "C", "Rol": "Mando",     "SV": False},
+    {"ID_Puesto": "Cond C",      "Nombre": "Cond C",      "Turno": "C", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Bombero C1",  "Nombre": "Bombero C1",  "Turno": "C", "Rol": "Bombero",   "SV": True},
+    {"ID_Puesto": "Bombero C2",  "Nombre": "Bombero C2",  "Turno": "C", "Rol": "Bombero",   "SV": False},
+    {"ID_Puesto": "Bombero C3",  "Nombre": "Bombero C3",  "Turno": "C", "Rol": "Bombero",   "SV": False},
 ]
 
 # -------------------------------------------------------------------
@@ -44,29 +44,17 @@ DEFAULT_ROSTER = [
 # -------------------------------------------------------------------
 
 def generate_base_schedule(year):
-    """
-    Genera el patrón 1-2 (T-L-L) con la secuencia correcta A -> B -> C.
-    """
     is_leap = calendar.isleap(year)
     total_days = 366 if is_leap else 365
-    
-    # CORRECCIÓN APLICADA:
-    # 0 = T (Trabaja hoy)
-    # 1 = L1 (Libró ayer, trabaja en 2 días)
-    # 2 = L2 (Libra hoy, TRABAJA MAÑANA)
-    
-    # Día 1: A trabaja (0). B trabaja mañana (2). C trabaja pasado (1).
+    # Secuencia Correcta A -> B -> C
     status = {'A': 0, 'B': 2, 'C': 1} 
-    
     schedule = {team: [] for team in TEAMS}
     
     for _ in range(total_days):
         for t in TEAMS:
             if status[t] == 0: schedule[t].append('T')
             else: schedule[t].append('L')
-            # Rotar estado: 0->1, 1->2, 2->0
             status[t] = (status[t] + 1) % 3
-            
     return schedule, total_days
 
 def get_candidates(person_missing, roster_df, day_idx, current_schedule):
@@ -230,7 +218,6 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
     border_thin = Side(border_style="thin", color="000000")
     border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
-    # HOJA 1: CUADRANTE
     ws1 = wb.active
     ws1.title = "Cuadrante"
     ws1.column_dimensions['A'].width = 15
@@ -296,7 +283,6 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
                 current_row += 1
             current_row += 2 
 
-    # HOJA 2: ESTADÍSTICAS
     ws2 = wb.create_sheet("Estadísticas")
     ws2.column_dimensions['A'].width = 20
     headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Días (T+T*)", "Total Vacs (Nat)"]
@@ -312,7 +298,6 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
         v_natural = sch.count('V') + sch.count('V(L)') + sch.count('V(R)')
         ws2.append([name, p['Turno'], p['Rol'], v_credits, t_cover, total_work, v_natural])
 
-    # HOJA 3: RESUMEN
     ws3 = wb.create_sheet("Resumen Solicitudes")
     ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados"])
     for _, p in roster_df.iterrows():
@@ -330,21 +315,23 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V3.3")
+st.set_page_config(layout="wide", page_title="Gestor V3.4")
 
-st.title("🚒 Gestor Integral V3.3")
+st.title("🚒 Gestor Integral V3.4")
 
 # 1. CONFIGURACIÓN Y NOCTURNAS
 c1, c2 = st.columns([2, 1])
 
 with c1:
-    with st.expander("1. Configuración de Plantilla", expanded=False):
+    with st.expander("1. Configuración de Plantilla (Edita los Nombres)", expanded=False):
         if 'roster_data' not in st.session_state:
             st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
         
+        # Aquí permitimos editar el NOMBRE pero NO el ID_Puesto (clave)
         edited_df = st.data_editor(
             st.session_state.roster_data,
             column_config={
+                "ID_Puesto": st.column_config.TextColumn(disabled=True, help="Identificador fijo"),
                 "Turno": st.column_config.SelectboxColumn(options=TEAMS, required=True),
                 "Rol": st.column_config.SelectboxColumn(options=ROLES, required=True),
                 "SV": st.column_config.CheckboxColumn(label="¿Es SV?", help="Puede cubrir conductor")
@@ -374,6 +361,9 @@ with c2:
 st.divider()
 col_main, col_list = st.columns([2, 1])
 
+# Usamos el NOMBRE para la lista, pero guardamos internamente la referencia por ID si fuera necesario
+# Para simplificar, el motor usa 'Nombre' como clave, así que si el usuario edita el nombre en la tabla,
+# ese es el nombre que aparecerá en el selector.
 names_list = edited_df['Nombre'].tolist()
 today = datetime.date.today()
 year_val = st.number_input("Año", value=today.year + 1)
@@ -382,12 +372,66 @@ if 'requests' not in st.session_state: st.session_state.requests = []
 credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
 
 with col_main:
-    st.subheader("2. Añadir Solicitud")
-    
-    # 1. Selector
+    # --- IMPORTADOR MASIVO ---
+    with st.expander("📂 Carga Masiva desde Excel (Opcional)"):
+        # Generar plantilla con ID_Puesto y Nombre
+        template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
+        template_df['Inicio'] = ""
+        template_df['Fin'] = ""
+        
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            template_df.to_excel(writer, index=False)
+        
+        st.download_button("⬇️ Descargar Plantilla Rellenable", buffer.getvalue(), "plantilla_vacaciones.xlsx")
+        
+        uploaded_file = st.file_uploader("Sube tu Excel relleno", type=['xlsx'])
+        if uploaded_file and st.button("Procesar Archivo"):
+            try:
+                df_upload = pd.read_excel(uploaded_file)
+                count = 0
+                errors = []
+                
+                for index, row in df_upload.iterrows():
+                    # Si las fechas están vacías, saltar
+                    if pd.isnull(row['Inicio']) or pd.isnull(row['Fin']):
+                        continue
+                        
+                    # Lógica de Matching:
+                    # 1. Buscar por ID_Puesto (Fijo)
+                    # 2. Si no, buscar por Nombre
+                    target_name = None
+                    
+                    # Intento 1: ID Puesto
+                    if 'ID_Puesto' in row and not pd.isnull(row['ID_Puesto']):
+                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
+                        if not match.empty:
+                            target_name = match.iloc[0]['Nombre'] # Usar el nombre actual configurado
+                    
+                    # Intento 2: Nombre directo (si falló ID o no existe)
+                    if not target_name and 'Nombre' in row:
+                        if row['Nombre'] in names_list:
+                            target_name = row['Nombre']
+                    
+                    if target_name:
+                        st.session_state.requests.append({
+                            "Nombre": target_name,
+                            "Inicio": pd.to_datetime(row['Inicio']).date(),
+                            "Fin": pd.to_datetime(row['Fin']).date()
+                        })
+                        count += 1
+                    else:
+                        errors.append(f"Fila {index+2}: No se encontró al trabajador (ID: {row.get('ID_Puesto')}, Nombre: {row.get('Nombre')})")
+                
+                if count > 0: st.success(f"✅ Importadas {count} solicitudes.")
+                if errors: st.error("\n".join(errors))
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    st.subheader("2. Añadir Solicitud Manual")
     sel_name = st.selectbox("Trabajador", names_list)
     
-    # 2. Visualización INTEGRADA
     if sel_name:
         spent = credits_map.get(sel_name, 0)
         st.progress(min(spent/13, 1.0), text=f"Créditos T usados: {spent} / 13")
@@ -400,7 +444,6 @@ with col_main:
         view_months = [1, 2, 3, 4, 5, 6] 
         
         st.caption("Calendario de Trabajo Base (Verde = T, Gris = L)")
-        
         html_cal = "<div style='display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;'>"
         for m in view_months:
             html_cal += f"<div style='border:1px solid #ddd; padding:2px; border-radius:3px; width:100px;'><strong>{MESES[m-1]}</strong>"
@@ -417,7 +460,6 @@ with col_main:
         html_cal += "</div>"
         st.markdown(html_cal, unsafe_allow_html=True)
 
-    # 3. Selector Fechas
     d_range = st.date_input("Selecciona Rango (Inicio - Fin)", [], help="Mira el calendario de arriba para guiarte")
     
     if st.button("Añadir Periodo", use_container_width=True):
@@ -445,7 +487,6 @@ with col_list:
                 st.session_state.requests.pop(i)
                 st.rerun()
 
-# 3. GENERACIÓN
 st.divider()
 if st.button("🚀 Generar Excel Final", type="primary", use_container_width=True):
     if not st.session_state.requests:
@@ -463,4 +504,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.3_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.4_{year_val}.xlsx")
