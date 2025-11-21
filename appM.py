@@ -48,6 +48,7 @@ DEFAULT_ROSTER = [
 def generate_base_schedule(year):
     is_leap = calendar.isleap(year)
     total_days = 366 if is_leap else 365
+    # Secuencia A(T) -> B(T) -> C(T)
     status = {'A': 0, 'B': 2, 'C': 1} 
     schedule = {team: [] for team in TEAMS}
     for _ in range(total_days):
@@ -61,10 +62,12 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule):
     candidates = []
     missing_role = person_missing['Rol']
     missing_turn = person_missing['Turno']
+    
     for _, candidate in roster_df.iterrows():
         if candidate['Turno'] == missing_turn: continue
         cand_status = current_schedule[candidate['Nombre']][day_idx]
         if cand_status != 'L': continue 
+        
         is_compatible = False
         if missing_role == "Mando":
             if candidate['Rol'] == "Mando": is_compatible = True
@@ -74,6 +77,7 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule):
         elif missing_role == "Bombero":
             if candidate['Rol'] == "Bombero": is_compatible = True
             if candidate['SV']: is_compatible = True
+            
         if is_compatible:
             candidates.append(candidate['Nombre'])
     return candidates
@@ -107,46 +111,36 @@ def calculate_spent_credits(roster_df, requests, year):
     return credits
 
 def get_clustered_dates(available_idxs, needed_count):
-    """
-    Algoritmo para agrupar días libres consecutivos.
-    Prioriza bloques grandes sobre días sueltos.
-    """
     if not available_idxs: return []
-    
-    # 1. Agrupar índices consecutivos (Ej: [1, 2, 5] -> [[1, 2], [5]])
     groups = []
     for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
         groups.append(list(map(itemgetter(1), g)))
-    
-    # 2. Ordenar grupos por longitud (de mayor a menor)
     groups.sort(key=len, reverse=True)
-    
-    # 3. Seleccionar días hasta cumplir 'needed_count'
     selected = []
     for group in groups:
         if len(selected) < needed_count:
             take = min(len(group), needed_count - len(selected))
             selected.extend(group[:take])
-        else:
-            break
-            
+        else: break
     return sorted(selected)
 
 def validate_and_generate(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
     final_schedule = {} 
-    coverage_counters = {name: 0 for name in roster_df['Nombre']}
+    turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
+    person_coverage_counters = {name: 0 for name in roster_df['Nombre']}
+    
     for _, row in roster_df.iterrows():
         final_schedule[row['Nombre']] = base_schedule_turn[row['Turno']].copy()
 
     day_vacations = {i: [] for i in range(total_days)}
     
+    # 1. Aplicar Vacaciones
     for req in requests:
         name = req['Nombre']
-        start = req['Inicio']
-        end = req['Fin']
-        start_idx = start.timetuple().tm_yday - 1
-        end_idx = end.timetuple().tm_yday - 1
+        start_idx = req['Inicio'].timetuple().tm_yday - 1
+        end_idx = req['Fin'].timetuple().tm_yday - 1
+        
         for d in range(start_idx, end_idx + 1):
             if final_schedule[name][d] == 'T':
                 day_vacations[d].append(name)
@@ -155,6 +149,8 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 final_schedule[name][d] = 'V(L)'
 
     errors = []
+    
+    # 2. Resolver Coberturas
     for d in range(total_days):
         absent_people = day_vacations[d]
         if not absent_people: continue
@@ -169,29 +165,46 @@ def validate_and_generate(roster_df, requests, year, night_periods):
             p2 = roster_df[roster_df['Nombre'] == absent_people[1]].iloc[0]
             if p1['Turno'] == p2['Turno']:
                 errors.append(f"Día {d+1}: {p1['Nombre']} y {p2['Nombre']} son del mismo turno.")
-            if p1['Rol'] == p2['Rol'] and p1['Rol'] != "Bombero":
-                pass 
 
         for name_missing in absent_people:
             person_row = roster_df[roster_df['Nombre'] == name_missing].iloc[0]
             candidates = get_candidates(person_row, roster_df, d, final_schedule)
+            
             if not candidates:
                 errors.append(f"Día {d+1}: Sin cobertura para {name_missing}.")
                 continue
+                
             valid_candidates = []
             for cand in candidates:
                 prev_day = final_schedule[cand][d-1] if d > 0 else 'L'
                 prev_prev = final_schedule[cand][d-2] if d > 1 else 'L'
-                if prev_day.startswith('T') and prev_prev.startswith('T'): continue
+                
+                is_prev_work = prev_day.startswith('T')
+                is_prev_prev_work = prev_prev.startswith('T')
+                
+                if is_prev_work and is_prev_prev_work:
+                    continue 
+                
                 valid_candidates.append(cand)
+            
             if not valid_candidates:
-                errors.append(f"Día {d+1}: Falta cobertura para {name_missing} (Regla Máx 2T).")
+                date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
+                errors.append(f"{date_str}: {name_missing} no tiene cobertura válida (Todos violarían Máx 2T).")
                 continue
-            valid_candidates.sort(key=lambda x: coverage_counters[x])
+            
+            def sort_key(cand_name):
+                cand_turn = roster_df[roster_df['Nombre'] == cand_name].iloc[0]['Turno']
+                return turn_coverage_counters[cand_turn]
+            
+            valid_candidates.sort(key=sort_key)
             chosen = valid_candidates[0]
+            chosen_turn = roster_df[roster_df['Nombre'] == chosen].iloc[0]['Turno']
+            
             final_schedule[chosen][d] = f"T*({person_row['Turno']})"
-            coverage_counters[chosen] += 1
+            turn_coverage_counters[chosen_turn] += 1
+            person_coverage_counters[chosen] += 1
 
+    # 3. Relleno Administrativo
     fill_log = {} 
     for name in roster_df['Nombre']:
         current_v_days = [i for i, x in enumerate(final_schedule[name]) if x.startswith('V')]
@@ -199,7 +212,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         added_dates = []
         if needed > 0:
             available_idx = [i for i, x in enumerate(final_schedule[name]) if x == 'L']
-            # --- CAMBIO V3.6: Usar agrupación (clustering) en vez de random puro ---
             if len(available_idx) >= needed:
                 fill_idxs = get_clustered_dates(available_idx, needed)
                 for idx in fill_idxs:
@@ -208,7 +220,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                     added_dates.append(d_obj)
         fill_log[name] = added_dates
 
-    return final_schedule, errors, coverage_counters, fill_log
+    return final_schedule, errors, person_coverage_counters, fill_log
 
 # -------------------------------------------------------------------
 # 2. GENERACIÓN EXCEL
@@ -222,6 +234,7 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
     s_Cov = PatternFill("solid", fgColor="FFC7CE") 
     s_L = PatternFill("solid", fgColor="F2F2F2") 
     s_Night = PatternFill("solid", fgColor="A6A6A6") 
+    
     font_bold = Font(bold=True)
     font_red = Font(color="9C0006", bold=True)
     align_c = Alignment(horizontal="center", vertical="center")
@@ -308,30 +321,20 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 
     # HOJA 3: RESUMEN
     ws3 = wb.create_sheet("Resumen Solicitudes")
-    # --- CAMBIO V3.6: Columna Extra ---
     ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados", "Días Relleno (Automático)"])
-    ws3.column_dimensions['A'].width = 20
-    ws3.column_dimensions['D'].width = 50
-    ws3.column_dimensions['E'].width = 50
-    
     for _, p in roster_df.iterrows():
         name = p['Nombre']
         person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
         req_str = " | ".join(person_reqs) if person_reqs else "Sin solicitudes"
         
-        # Formatear relleno agrupado
         fill_dates = fill_log[name]
-        # Intentar mostrar rangos si son consecutivos para que quede limpio
         fill_str = "Ninguno"
         if fill_dates:
-            # Agrupar visualmente en rangos para el texto
             date_ranges = []
+            fill_dates.sort()
             if fill_dates:
-                # Sort just in case
-                fill_dates.sort()
                 range_start = fill_dates[0]
                 range_end = fill_dates[0]
-                
                 for i in range(1, len(fill_dates)):
                     if (fill_dates[i] - fill_dates[i-1]).days == 1:
                         range_end = fill_dates[i]
@@ -342,12 +345,10 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
                             date_ranges.append(f"{range_start.strftime('%d/%m')}-{range_end.strftime('%d/%m')}")
                         range_start = fill_dates[i]
                         range_end = fill_dates[i]
-                # Ultimo rango
                 if range_start == range_end:
                     date_ranges.append(range_start.strftime('%d/%m'))
                 else:
                     date_ranges.append(f"{range_start.strftime('%d/%m')}-{range_end.strftime('%d/%m')}")
-            
             fill_str = ", ".join(date_ranges)
 
         ws3.append([name, p['Turno'], p['Rol'], req_str, fill_str])
@@ -361,18 +362,16 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V3.6")
+st.set_page_config(layout="wide", page_title="Gestor V3.8")
 
-st.title("🚒 Gestor Integral V3.6")
+st.title("🚒 Gestor Integral V3.8")
 
-# 1. CONFIGURACIÓN Y NOCTURNAS
+# 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
-
 with c1:
     with st.expander("1. Configuración de Plantilla", expanded=False):
         if 'roster_data' not in st.session_state:
             st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
-        
         edited_df = st.data_editor(
             st.session_state.roster_data,
             column_config={
@@ -392,8 +391,7 @@ with c2:
         dn_start = st.date_input("Inicio Noche", value=None)
         dn_end = st.date_input("Fin Noche", value=None)
         if st.button("Añadir Periodo"):
-            if dn_start and dn_end:
-                st.session_state.nights.append((dn_start, dn_end))
+            if dn_start and dn_end: st.session_state.nights.append((dn_start, dn_end))
         if st.session_state.nights:
             for i, (s, e) in enumerate(st.session_state.nights):
                 col_del, col_tx = st.columns([1,4])
@@ -402,10 +400,9 @@ with c2:
                     st.rerun()
                 col_tx.text(f"{s.strftime('%d/%m')} - {e.strftime('%d/%m')}")
 
-# 2. GESTOR DE VACACIONES
+# 2. GESTOR
 st.divider()
 col_main, col_list = st.columns([2, 1])
-
 names_list = edited_df['Nombre'].tolist()
 today = datetime.date.today()
 year_val = st.number_input("Año", value=today.year + 1)
@@ -414,37 +411,32 @@ if 'requests' not in st.session_state: st.session_state.requests = []
 credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
 
 with col_main:
-    # --- IMPORTADOR MASIVO ---
-    with st.expander("📂 Carga Masiva Horizontal (Excel)"):
+    with st.expander("📂 Carga Masiva Horizontal"):
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
-        for i in range(1, 11):
+        # --- AUMENTADO A 20 PERIODOS ---
+        for i in range(1, 21): 
             template_df[f'Inicio {i}'] = ""
             template_df[f'Fin {i}'] = ""
-        
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             template_df.to_excel(writer, index=False)
+        st.download_button("⬇️ Descargar Plantilla", buffer.getvalue(), "plantilla_h.xlsx")
         
-        st.download_button("⬇️ Descargar Plantilla Horizontal", buffer.getvalue(), "plantilla_vacaciones_horizontal.xlsx")
-        
-        uploaded_file = st.file_uploader("Sube tu Excel Horizontal", type=['xlsx'])
+        uploaded_file = st.file_uploader("Sube Excel", type=['xlsx'])
         if uploaded_file and st.button("Procesar Archivo"):
             try:
                 df_upload = pd.read_excel(uploaded_file)
                 count = 0
-                errors = []
-                
                 for index, row in df_upload.iterrows():
                     target_name = None
                     if 'ID_Puesto' in row and not pd.isnull(row['ID_Puesto']):
                         match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
                         if not match.empty: target_name = match.iloc[0]['Nombre']
-                    
                     if not target_name and 'Nombre' in row:
                         if row['Nombre'] in names_list: target_name = row['Nombre']
-                    
                     if target_name:
-                        for i in range(1, 11):
+                        # --- BUCLE AUMENTADO A 20 ---
+                        for i in range(1, 21):
                             col_start = f'Inicio {i}'
                             col_end = f'Fin {i}'
                             if col_start in row and col_end in row:
@@ -457,31 +449,21 @@ with col_main:
                                         "Fin": pd.to_datetime(val_end).date()
                                     })
                                     count += 1
-                    else:
-                        errors.append(f"Fila {index+2}: Trabajador no encontrado.")
-                
-                if count > 0: st.success(f"✅ Importados {count} periodos.")
-                if errors: st.error("\n".join(errors))
+                if count > 0: st.success(f"✅ Importados {count}.")
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
+            except Exception as e: st.error(f"Error: {e}")
 
     st.subheader("2. Añadir Solicitud Manual")
     sel_name = st.selectbox("Trabajador", names_list)
-    
     if sel_name:
         spent = credits_map.get(sel_name, 0)
-        st.progress(min(spent/13, 1.0), text=f"Créditos T usados: {spent} / 13")
-        if spent > 13: st.error(f"⚠️ Límite excedido ({spent})")
+        st.progress(min(spent/13, 1.0), text=f"Créditos T: {spent} / 13")
         
         row_p = edited_df[edited_df['Nombre'] == sel_name].iloc[0]
         base_sch, _ = generate_base_schedule(year_val)
         my_sch = base_sch[row_p['Turno']]
-        
-        # --- CAMBIO V3.6: Visualizar TODOS los meses (1-12) ---
         view_months = list(range(1, 13))
         
-        st.caption("Calendario Base (Verde = T, Gris = L)")
         html_cal = "<div style='display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;'>"
         for m in view_months:
             html_cal += f"<div style='border:1px solid #ddd; padding:2px; border-radius:3px; width:100px;'><strong>{MESES[m-1]}</strong>"
@@ -498,22 +480,19 @@ with col_main:
         html_cal += "</div>"
         st.markdown(html_cal, unsafe_allow_html=True)
 
-    d_range = st.date_input("Selecciona Rango (Inicio - Fin)", [], help="Mira el calendario de arriba para guiarte")
-    
+    d_range = st.date_input("Selecciona Rango", [], help="Inicio - Fin")
     if st.button("Añadir Periodo", use_container_width=True):
         if len(d_range) == 2:
             start, end = d_range
             conflict = False
             if is_night_restricted(start, st.session_state.nights) or is_night_restricted(end, st.session_state.nights):
-                st.error("⛔ Conflicto con periodo nocturno.")
+                st.error("⛔ Conflicto periodo nocturno.")
                 conflict = True
-            
             if not conflict:
                 st.session_state.requests.append({"Nombre": sel_name, "Inicio": start, "Fin": end})
-                st.success(f"Añadido para {sel_name}")
+                st.success(f"Añadido: {sel_name}")
                 st.rerun()
-        else:
-            st.warning("Debes seleccionar fecha inicio y fin.")
+        else: st.warning("Selecciona fechas.")
 
 with col_list:
     st.subheader("Listado")
@@ -525,7 +504,6 @@ with col_list:
                 st.session_state.requests.pop(i)
                 st.rerun()
 
-# 3. GENERACIÓN
 st.divider()
 if st.button("🚀 Generar Excel Final", type="primary", use_container_width=True):
     if not st.session_state.requests:
@@ -534,7 +512,6 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
         final_sch, errs, counters, fill_log = validate_and_generate(
             edited_df, st.session_state.requests, year_val, st.session_state.nights
         )
-        
         if errs:
             st.error("❌ Conflictos:")
             for e in errs: st.write(f"- {e}")
@@ -543,4 +520,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.6_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.8_{year_val}.xlsx")
