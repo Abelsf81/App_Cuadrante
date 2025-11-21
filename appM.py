@@ -8,6 +8,8 @@ import io
 import random
 import calendar 
 import pandas as pd
+from itertools import groupby
+from operator import itemgetter
 
 # --- CONSTANTES Y CONFIGURACIÓN ---
 TEAMS = ['A', 'B', 'C']
@@ -104,6 +106,32 @@ def calculate_spent_credits(roster_df, requests, year):
         credits[name] += cost
     return credits
 
+def get_clustered_dates(available_idxs, needed_count):
+    """
+    Algoritmo para agrupar días libres consecutivos.
+    Prioriza bloques grandes sobre días sueltos.
+    """
+    if not available_idxs: return []
+    
+    # 1. Agrupar índices consecutivos (Ej: [1, 2, 5] -> [[1, 2], [5]])
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    
+    # 2. Ordenar grupos por longitud (de mayor a menor)
+    groups.sort(key=len, reverse=True)
+    
+    # 3. Seleccionar días hasta cumplir 'needed_count'
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else:
+            break
+            
+    return sorted(selected)
+
 def validate_and_generate(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
     final_schedule = {} 
@@ -171,9 +199,9 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         added_dates = []
         if needed > 0:
             available_idx = [i for i, x in enumerate(final_schedule[name]) if x == 'L']
+            # --- CAMBIO V3.6: Usar agrupación (clustering) en vez de random puro ---
             if len(available_idx) >= needed:
-                fill_idxs = random.sample(available_idx, needed)
-                fill_idxs.sort()
+                fill_idxs = get_clustered_dates(available_idx, needed)
                 for idx in fill_idxs:
                     final_schedule[name][idx] = 'V(R)'
                     d_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=idx)
@@ -187,6 +215,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
 # -------------------------------------------------------------------
 def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods):
     wb = Workbook()
+    
     s_T = PatternFill("solid", fgColor="C6EFCE") 
     s_V = PatternFill("solid", fgColor="FFEB9C") 
     s_VR = PatternFill("solid", fgColor="FFFFE0") 
@@ -279,12 +308,49 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 
     # HOJA 3: RESUMEN
     ws3 = wb.create_sheet("Resumen Solicitudes")
-    ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados"])
+    # --- CAMBIO V3.6: Columna Extra ---
+    ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados", "Días Relleno (Automático)"])
+    ws3.column_dimensions['A'].width = 20
+    ws3.column_dimensions['D'].width = 50
+    ws3.column_dimensions['E'].width = 50
+    
     for _, p in roster_df.iterrows():
         name = p['Nombre']
         person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
         req_str = " | ".join(person_reqs) if person_reqs else "Sin solicitudes"
-        ws3.append([name, p['Turno'], p['Rol'], req_str])
+        
+        # Formatear relleno agrupado
+        fill_dates = fill_log[name]
+        # Intentar mostrar rangos si son consecutivos para que quede limpio
+        fill_str = "Ninguno"
+        if fill_dates:
+            # Agrupar visualmente en rangos para el texto
+            date_ranges = []
+            if fill_dates:
+                # Sort just in case
+                fill_dates.sort()
+                range_start = fill_dates[0]
+                range_end = fill_dates[0]
+                
+                for i in range(1, len(fill_dates)):
+                    if (fill_dates[i] - fill_dates[i-1]).days == 1:
+                        range_end = fill_dates[i]
+                    else:
+                        if range_start == range_end:
+                            date_ranges.append(range_start.strftime('%d/%m'))
+                        else:
+                            date_ranges.append(f"{range_start.strftime('%d/%m')}-{range_end.strftime('%d/%m')}")
+                        range_start = fill_dates[i]
+                        range_end = fill_dates[i]
+                # Ultimo rango
+                if range_start == range_end:
+                    date_ranges.append(range_start.strftime('%d/%m'))
+                else:
+                    date_ranges.append(f"{range_start.strftime('%d/%m')}-{range_end.strftime('%d/%m')}")
+            
+            fill_str = ", ".join(date_ranges)
+
+        ws3.append([name, p['Turno'], p['Rol'], req_str, fill_str])
 
     out = io.BytesIO()
     wb.save(out)
@@ -295,9 +361,9 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V3.5")
+st.set_page_config(layout="wide", page_title="Gestor V3.6")
 
-st.title("🚒 Gestor Integral V3.5")
+st.title("🚒 Gestor Integral V3.6")
 
 # 1. CONFIGURACIÓN Y NOCTURNAS
 c1, c2 = st.columns([2, 1])
@@ -348,11 +414,9 @@ if 'requests' not in st.session_state: st.session_state.requests = []
 credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
 
 with col_main:
-    # --- IMPORTADOR MASIVO HORIZONTAL ---
+    # --- IMPORTADOR MASIVO ---
     with st.expander("📂 Carga Masiva Horizontal (Excel)"):
-        # Generar plantilla horizontal (hasta 10 periodos)
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
-        # Añadir columnas para 10 periodos
         for i in range(1, 11):
             template_df[f'Inicio {i}'] = ""
             template_df[f'Fin {i}'] = ""
@@ -371,7 +435,6 @@ with col_main:
                 errors = []
                 
                 for index, row in df_upload.iterrows():
-                    # Identificar trabajador
                     target_name = None
                     if 'ID_Puesto' in row and not pd.isnull(row['ID_Puesto']):
                         match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
@@ -381,16 +444,12 @@ with col_main:
                         if row['Nombre'] in names_list: target_name = row['Nombre']
                     
                     if target_name:
-                        # Iterar por los 10 posibles periodos
                         for i in range(1, 11):
                             col_start = f'Inicio {i}'
                             col_end = f'Fin {i}'
-                            
-                            # Verificar si existen las columnas y tienen datos
                             if col_start in row and col_end in row:
                                 val_start = row[col_start]
                                 val_end = row[col_end]
-                                
                                 if not pd.isnull(val_start) and not pd.isnull(val_end):
                                     st.session_state.requests.append({
                                         "Nombre": target_name,
@@ -419,7 +478,9 @@ with col_main:
         base_sch, _ = generate_base_schedule(year_val)
         my_sch = base_sch[row_p['Turno']]
         
-        view_months = [1, 2, 3, 4, 5, 6] 
+        # --- CAMBIO V3.6: Visualizar TODOS los meses (1-12) ---
+        view_months = list(range(1, 13))
+        
         st.caption("Calendario Base (Verde = T, Gris = L)")
         html_cal = "<div style='display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;'>"
         for m in view_months:
@@ -482,4 +543,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.5_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.6_{year_val}.xlsx")
