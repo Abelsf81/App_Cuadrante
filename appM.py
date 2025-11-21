@@ -359,9 +359,9 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V4.1")
+st.set_page_config(layout="wide", page_title="Gestor V4.2")
 
-st.title("🚒 Gestor Integral V4.1 (Clean UI)")
+st.title("🚒 Gestor Integral V4.2")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -393,19 +393,32 @@ with c2:
         if st.button("Añadir Periodo"):
             if dn_start and dn_end: st.session_state.nights.append((dn_start, dn_end))
         
-        # Masiva
+        # Masiva (FIXED)
         uploaded_n = st.file_uploader("Subir Excel", type=['xlsx'], key="n_up", label_visibility="collapsed")
         if uploaded_n and st.button("Procesar"):
             try:
                 df_n = pd.read_excel(uploaded_n)
+                added = 0
                 for _, row in df_n.iterrows():
-                    if not pd.isnull(row.iloc[0]) and not pd.isnull(row.iloc[1]):
-                        st.session_state.nights.append((pd.to_datetime(row.iloc[0]).date(), pd.to_datetime(row.iloc[1]).date()))
-                st.success("Importado")
+                    # INTENTO 1: Por nombre de columna 'Inicio' y 'Fin'
+                    val_s = row.get('Inicio')
+                    val_e = row.get('Fin')
+                    
+                    # INTENTO 2: Por posición (Col 0 y Col 1)
+                    if pd.isnull(val_s) or pd.isnull(val_e):
+                        val_s = row.iloc[0]
+                        val_e = row.iloc[1]
+                    
+                    if not pd.isnull(val_s) and not pd.isnull(val_e):
+                        st.session_state.nights.append((pd.to_datetime(val_s).date(), pd.to_datetime(val_e).date()))
+                        added += 1
+                        
+                if added > 0: st.success(f"Importados {added} periodos.")
+                else: st.warning("No se encontraron fechas válidas.")
                 st.rerun()
-            except: st.error("Error Excel")
+            except Exception as e: st.error(f"Error leyendo Excel: {e}")
 
-        # Scrollable Container para la lista
+        # Scrollable List
         with st.container(height=200):
             if st.session_state.nights:
                 for i, (s, e) in enumerate(st.session_state.nights):
@@ -514,22 +527,18 @@ with col_list:
     st.subheader("Listado Solicitudes")
     
     if st.session_state.requests:
-        # Agrupar solicitudes por Nombre
-        # Necesitamos guardar el índice original para poder borrar
         indexed_requests = []
         for i, r in enumerate(st.session_state.requests):
             r_with_index = r.copy()
             r_with_index['idx'] = i
             indexed_requests.append(r_with_index)
             
-        # Sort by name first for groupby
         indexed_requests.sort(key=lambda x: x['Nombre'])
         
         grouped_reqs = {}
         for key, group in groupby(indexed_requests, lambda x: x['Nombre']):
             grouped_reqs[key] = list(group)
             
-        # Mostrar un expander por persona
         for name, reqs in grouped_reqs.items():
             with st.expander(f"{name} ({len(reqs)})"):
                 for r in reqs:
@@ -561,4 +570,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V4.1_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V4.2_{year_val}.xlsx")
