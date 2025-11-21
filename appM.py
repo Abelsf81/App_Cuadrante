@@ -48,7 +48,6 @@ DEFAULT_ROSTER = [
 def generate_base_schedule(year):
     is_leap = calendar.isleap(year)
     total_days = 366 if is_leap else 365
-    # Secuencia A(T) -> B(T) -> C(T)
     status = {'A': 0, 'B': 2, 'C': 1} 
     schedule = {team: [] for team in TEAMS}
     for _ in range(total_days):
@@ -130,12 +129,14 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
     person_coverage_counters = {name: 0 for name in roster_df['Nombre']}
     
+    # Mapa rápido nombre -> turno para optimizar sorting
+    name_to_turn = {row['Nombre']: row['Turno'] for _, row in roster_df.iterrows()}
+    
     for _, row in roster_df.iterrows():
         final_schedule[row['Nombre']] = base_schedule_turn[row['Turno']].copy()
 
     day_vacations = {i: [] for i in range(total_days)}
     
-    # 1. Aplicar Vacaciones
     for req in requests:
         name = req['Nombre']
         start_idx = req['Inicio'].timetuple().tm_yday - 1
@@ -150,7 +151,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
 
     errors = []
     
-    # 2. Resolver Coberturas
     for d in range(total_days):
         absent_people = day_vacations[d]
         if not absent_people: continue
@@ -189,22 +189,30 @@ def validate_and_generate(roster_df, requests, year, night_periods):
             
             if not valid_candidates:
                 date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
-                errors.append(f"{date_str}: {name_missing} no tiene cobertura válida (Todos violarían Máx 2T).")
+                errors.append(f"{date_str}: {name_missing} no tiene cobertura válida (Regla Máx 2T).")
                 continue
             
+            # --- CAMBIO V3.9: DESEMPATE DOBLE NIVEL ---
+            # 1. Prioridad: Turno menos cargado
+            # 2. Prioridad: Persona menos cargada (dentro de ese turno)
+            # 3. Random: Para romper empates perfectos
+            
             def sort_key(cand_name):
-                cand_turn = roster_df[roster_df['Nombre'] == cand_name].iloc[0]['Turno']
-                return turn_coverage_counters[cand_turn]
+                cand_turn = name_to_turn[cand_name]
+                return (
+                    turn_coverage_counters[cand_turn],  # Nivel 1: Justicia de Turno
+                    person_coverage_counters[cand_name],# Nivel 2: Justicia Individual
+                    random.random()                     # Nivel 3: Ruido aleatorio
+                )
             
             valid_candidates.sort(key=sort_key)
             chosen = valid_candidates[0]
-            chosen_turn = roster_df[roster_df['Nombre'] == chosen].iloc[0]['Turno']
+            chosen_turn = name_to_turn[chosen]
             
             final_schedule[chosen][d] = f"T*({person_row['Turno']})"
             turn_coverage_counters[chosen_turn] += 1
             person_coverage_counters[chosen] += 1
 
-    # 3. Relleno Administrativo
     fill_log = {} 
     for name in roster_df['Nombre']:
         current_v_days = [i for i, x in enumerate(final_schedule[name]) if x.startswith('V')]
@@ -227,21 +235,18 @@ def validate_and_generate(roster_df, requests, year, night_periods):
 # -------------------------------------------------------------------
 def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods):
     wb = Workbook()
-    
     s_T = PatternFill("solid", fgColor="C6EFCE") 
     s_V = PatternFill("solid", fgColor="FFEB9C") 
     s_VR = PatternFill("solid", fgColor="FFFFE0") 
     s_Cov = PatternFill("solid", fgColor="FFC7CE") 
     s_L = PatternFill("solid", fgColor="F2F2F2") 
     s_Night = PatternFill("solid", fgColor="A6A6A6") 
-    
     font_bold = Font(bold=True)
     font_red = Font(color="9C0006", bold=True)
     align_c = Alignment(horizontal="center", vertical="center")
     border_thin = Side(border_style="thin", color="000000")
     border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
-    # HOJA 1: CUADRANTE
     ws1 = wb.active
     ws1.title = "Cuadrante"
     ws1.column_dimensions['A'].width = 15
@@ -303,7 +308,6 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
                 current_row += 1
             current_row += 2 
 
-    # HOJA 2: ESTADÍSTICAS
     ws2 = wb.create_sheet("Estadísticas")
     ws2.column_dimensions['A'].width = 20
     headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Días (T+T*)", "Total Vacs (Nat)"]
@@ -319,9 +323,11 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
         v_natural = sch.count('V') + sch.count('V(L)') + sch.count('V(R)')
         ws2.append([name, p['Turno'], p['Rol'], v_credits, t_cover, total_work, v_natural])
 
-    # HOJA 3: RESUMEN
     ws3 = wb.create_sheet("Resumen Solicitudes")
     ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados", "Días Relleno (Automático)"])
+    ws3.column_dimensions['A'].width = 20
+    ws3.column_dimensions['D'].width = 50
+    ws3.column_dimensions['E'].width = 50
     for _, p in roster_df.iterrows():
         name = p['Nombre']
         person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
@@ -362,11 +368,10 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V3.8")
+st.set_page_config(layout="wide", page_title="Gestor V3.9")
 
-st.title("🚒 Gestor Integral V3.8")
+st.title("🚒 Gestor Integral V3.9 (Equilibrio Individual)")
 
-# 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
 with c1:
     with st.expander("1. Configuración de Plantilla", expanded=False):
@@ -400,7 +405,6 @@ with c2:
                     st.rerun()
                 col_tx.text(f"{s.strftime('%d/%m')} - {e.strftime('%d/%m')}")
 
-# 2. GESTOR
 st.divider()
 col_main, col_list = st.columns([2, 1])
 names_list = edited_df['Nombre'].tolist()
@@ -413,7 +417,6 @@ credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year
 with col_main:
     with st.expander("📂 Carga Masiva Horizontal"):
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
-        # --- AUMENTADO A 20 PERIODOS ---
         for i in range(1, 21): 
             template_df[f'Inicio {i}'] = ""
             template_df[f'Fin {i}'] = ""
@@ -435,7 +438,6 @@ with col_main:
                     if not target_name and 'Nombre' in row:
                         if row['Nombre'] in names_list: target_name = row['Nombre']
                     if target_name:
-                        # --- BUCLE AUMENTADO A 20 ---
                         for i in range(1, 21):
                             col_start = f'Inicio {i}'
                             col_end = f'Fin {i}'
@@ -520,4 +522,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.8_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.9_{year_val}.xlsx")
