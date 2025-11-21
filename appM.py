@@ -129,7 +129,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
     person_coverage_counters = {name: 0 for name in roster_df['Nombre']}
     
-    # Mapa rápido nombre -> turno
     name_to_turn = {row['Nombre']: row['Turno'] for _, row in roster_df.iterrows()}
     
     for _, row in roster_df.iterrows():
@@ -192,7 +191,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 errors.append(f"{date_str}: {name_missing} no tiene cobertura válida (Regla Máx 2T).")
                 continue
             
-            # DESEMPATE DOBLE: 1. Turno, 2. Persona, 3. Random
             def sort_key(cand_name):
                 cand_turn = name_to_turn[cand_name]
                 return (
@@ -361,9 +359,9 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V4.0")
+st.set_page_config(layout="wide", page_title="Gestor V4.1")
 
-st.title("🚒 Gestor Integral V4.0 (Nocturnas Excel)")
+st.title("🚒 Gestor Integral V4.1 (Clean UI)")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -385,48 +383,39 @@ with c1:
         st.session_state.roster_data = edited_df
 
 with c2:
-    with st.expander("🌑 Periodos Nocturnos (Gris)", expanded=False):
+    with st.expander("🌑 Periodos Nocturnos", expanded=True):
         if 'nights' not in st.session_state: st.session_state.nights = []
         
-        # MANUAL
-        dn_start = st.date_input("Inicio Noche", value=None)
-        dn_end = st.date_input("Fin Noche", value=None)
-        if st.button("Añadir Manual"):
+        # Manual
+        c_dn1, c_dn2 = st.columns(2)
+        dn_start = c_dn1.date_input("Inicio", value=None, label_visibility="collapsed")
+        dn_end = c_dn2.date_input("Fin", value=None, label_visibility="collapsed")
+        if st.button("Añadir Periodo"):
             if dn_start and dn_end: st.session_state.nights.append((dn_start, dn_end))
         
-        st.divider()
-        
-        # MASIVO EXCEL
-        st.write("📂 **Carga Masiva (Excel)**")
-        night_template = pd.DataFrame({"Inicio": [], "Fin": []})
-        buf_night = io.BytesIO()
-        with pd.ExcelWriter(buf_night, engine='openpyxl') as writer:
-            night_template.to_excel(writer, index=False)
-        st.download_button("⬇️ Plantilla Nocturnas", buf_night.getvalue(), "plantilla_nocturnas.xlsx")
-        
-        night_file = st.file_uploader("Sube Excel Nocturnas", type=['xlsx'], key="night_upload")
-        if night_file and st.button("Procesar Nocturnas"):
+        # Masiva
+        uploaded_n = st.file_uploader("Subir Excel", type=['xlsx'], key="n_up", label_visibility="collapsed")
+        if uploaded_n and st.button("Procesar"):
             try:
-                df_n = pd.read_excel(night_file)
-                count_n = 0
+                df_n = pd.read_excel(uploaded_n)
                 for _, row in df_n.iterrows():
-                    if not pd.isnull(row['Inicio']) and not pd.isnull(row['Fin']):
-                        s = pd.to_datetime(row['Inicio']).date()
-                        e = pd.to_datetime(row['Fin']).date()
-                        st.session_state.nights.append((s, e))
-                        count_n += 1
-                st.success(f"Añadidos {count_n} periodos.")
+                    if not pd.isnull(row.iloc[0]) and not pd.isnull(row.iloc[1]):
+                        st.session_state.nights.append((pd.to_datetime(row.iloc[0]).date(), pd.to_datetime(row.iloc[1]).date()))
+                st.success("Importado")
                 st.rerun()
-            except Exception as ex: st.error(f"Error: {ex}")
+            except: st.error("Error Excel")
 
-        if st.session_state.nights:
-            st.write("--- Activos ---")
-            for i, (s, e) in enumerate(st.session_state.nights):
-                col_del, col_tx = st.columns([1,4])
-                if col_del.button("x", key=f"n_{i}"):
-                    st.session_state.nights.pop(i)
-                    st.rerun()
-                col_tx.text(f"{s.strftime('%d/%m')} - {e.strftime('%d/%m')}")
+        # Scrollable Container para la lista
+        with st.container(height=200):
+            if st.session_state.nights:
+                for i, (s, e) in enumerate(st.session_state.nights):
+                    col_del, col_tx = st.columns([1,5])
+                    if col_del.button("x", key=f"n_{i}"):
+                        st.session_state.nights.pop(i)
+                        st.rerun()
+                    col_tx.caption(f"{s.strftime('%d/%m')} - {e.strftime('%d/%m')}")
+            else:
+                st.caption("Sin periodos.")
 
 # 2. GESTOR
 st.divider()
@@ -439,7 +428,7 @@ if 'requests' not in st.session_state: st.session_state.requests = []
 credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
 
 with col_main:
-    with st.expander("📂 Carga Masiva Vacaciones"):
+    with st.expander("📂 Carga Masiva Horizontal"):
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
         for i in range(1, 21): 
             template_df[f'Inicio {i}'] = ""
@@ -447,9 +436,9 @@ with col_main:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             template_df.to_excel(writer, index=False)
-        st.download_button("⬇️ Descargar Plantilla Vacaciones", buffer.getvalue(), "plantilla_vacaciones.xlsx")
+        st.download_button("⬇️ Descargar Plantilla", buffer.getvalue(), "plantilla_h.xlsx")
         
-        uploaded_file = st.file_uploader("Sube Excel Vacaciones", type=['xlsx'])
+        uploaded_file = st.file_uploader("Sube Excel", type=['xlsx'])
         if uploaded_file and st.button("Procesar Archivo"):
             try:
                 df_upload = pd.read_excel(uploaded_file)
@@ -520,15 +509,41 @@ with col_main:
                 st.rerun()
         else: st.warning("Selecciona fechas.")
 
+# --- LISTA LIMPIA CON ACORDEONES ---
 with col_list:
-    st.subheader("Listado")
+    st.subheader("Listado Solicitudes")
+    
     if st.session_state.requests:
+        # Agrupar solicitudes por Nombre
+        # Necesitamos guardar el índice original para poder borrar
+        indexed_requests = []
         for i, r in enumerate(st.session_state.requests):
-            c_txt, c_btn = st.columns([4, 1])
-            c_txt.text(f"{r['Nombre']}\n{r['Inicio'].strftime('%d/%m')} - {r['Fin'].strftime('%d/%m')}")
-            if c_btn.button("🗑️", key=f"del_{i}"):
-                st.session_state.requests.pop(i)
-                st.rerun()
+            r_with_index = r.copy()
+            r_with_index['idx'] = i
+            indexed_requests.append(r_with_index)
+            
+        # Sort by name first for groupby
+        indexed_requests.sort(key=lambda x: x['Nombre'])
+        
+        grouped_reqs = {}
+        for key, group in groupby(indexed_requests, lambda x: x['Nombre']):
+            grouped_reqs[key] = list(group)
+            
+        # Mostrar un expander por persona
+        for name, reqs in grouped_reqs.items():
+            with st.expander(f"{name} ({len(reqs)})"):
+                for r in reqs:
+                    c_txt, c_btn = st.columns([4, 1])
+                    c_txt.caption(f"{r['Inicio'].strftime('%d/%m')} - {r['Fin'].strftime('%d/%m')}")
+                    if c_btn.button("🗑️", key=f"del_{r['idx']}"):
+                        st.session_state.requests.pop(r['idx'])
+                        st.rerun()
+    else:
+        st.info("Sin solicitudes.")
+
+    if st.button("🗑️ Borrar TODO", type="secondary"):
+        st.session_state.requests = []
+        st.rerun()
 
 st.divider()
 if st.button("🚀 Generar Excel Final", type="primary", use_container_width=True):
@@ -546,4 +561,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V4.0_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V4.1_{year_val}.xlsx")
