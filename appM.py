@@ -44,16 +44,29 @@ DEFAULT_ROSTER = [
 # -------------------------------------------------------------------
 
 def generate_base_schedule(year):
+    """
+    Genera el patrón 1-2 (T-L-L) con la secuencia correcta A -> B -> C.
+    """
     is_leap = calendar.isleap(year)
     total_days = 366 if is_leap else 365
-    status = {'A': 0, 'B': 1, 'C': 2} # 0=T, 1=L1, 2=L2
+    
+    # CORRECCIÓN APLICADA:
+    # 0 = T (Trabaja hoy)
+    # 1 = L1 (Libró ayer, trabaja en 2 días)
+    # 2 = L2 (Libra hoy, TRABAJA MAÑANA)
+    
+    # Día 1: A trabaja (0). B trabaja mañana (2). C trabaja pasado (1).
+    status = {'A': 0, 'B': 2, 'C': 1} 
+    
     schedule = {team: [] for team in TEAMS}
     
     for _ in range(total_days):
         for t in TEAMS:
             if status[t] == 0: schedule[t].append('T')
             else: schedule[t].append('L')
+            # Rotar estado: 0->1, 1->2, 2->0
             status[t] = (status[t] + 1) % 3
+            
     return schedule, total_days
 
 def get_candidates(person_missing, roster_df, day_idx, current_schedule):
@@ -317,9 +330,9 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V3.2")
+st.set_page_config(layout="wide", page_title="Gestor V3.3")
 
-st.title("🚒 Gestor Integral V3.2")
+st.title("🚒 Gestor Integral V3.3")
 
 # 1. CONFIGURACIÓN Y NOCTURNAS
 c1, c2 = st.columns([2, 1])
@@ -359,38 +372,32 @@ with c2:
 
 # 2. GESTOR DE VACACIONES
 st.divider()
-# Aquí combinamos visualizador y selector en una sola columna ancha
 col_main, col_list = st.columns([2, 1])
 
 names_list = edited_df['Nombre'].tolist()
 today = datetime.date.today()
 year_val = st.number_input("Año", value=today.year + 1)
 
-# Calcular Créditos
 if 'requests' not in st.session_state: st.session_state.requests = []
 credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
 
 with col_main:
     st.subheader("2. Añadir Solicitud")
     
-    # 1. Selector de Nombre
+    # 1. Selector
     sel_name = st.selectbox("Trabajador", names_list)
     
-    # 2. Visualización INTEGRADA (Barra + Calendario)
+    # 2. Visualización INTEGRADA
     if sel_name:
-        # Barra Progreso
         spent = credits_map.get(sel_name, 0)
         st.progress(min(spent/13, 1.0), text=f"Créditos T usados: {spent} / 13")
         if spent > 13: st.error(f"⚠️ Límite excedido ({spent})")
         
-        # Mini Calendario Visual
         row_p = edited_df[edited_df['Nombre'] == sel_name].iloc[0]
         base_sch, _ = generate_base_schedule(year_val)
         my_sch = base_sch[row_p['Turno']]
         
-        # Mostrar 3 meses por defecto o los del rango si se ha seleccionado algo
-        # Como el date_input aún no se ha tocado (es el siguiente widget), mostramos Ene-Feb-Mar por defecto
-        view_months = [1, 2, 3, 4, 5, 6] # Mostramos medio año para que sea útil
+        view_months = [1, 2, 3, 4, 5, 6] 
         
         st.caption("Calendario de Trabajo Base (Verde = T, Gris = L)")
         
@@ -410,7 +417,7 @@ with col_main:
         html_cal += "</div>"
         st.markdown(html_cal, unsafe_allow_html=True)
 
-    # 3. Selector de Fechas (Justo debajo del mapa)
+    # 3. Selector Fechas
     d_range = st.date_input("Selecciona Rango (Inicio - Fin)", [], help="Mira el calendario de arriba para guiarte")
     
     if st.button("Añadir Periodo", use_container_width=True):
@@ -456,4 +463,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.2_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.3_{year_val}.xlsx")
