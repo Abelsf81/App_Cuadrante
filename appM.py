@@ -129,7 +129,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
     person_coverage_counters = {name: 0 for name in roster_df['Nombre']}
     
-    # Mapa rápido nombre -> turno para optimizar sorting
+    # Mapa rápido nombre -> turno
     name_to_turn = {row['Nombre']: row['Turno'] for _, row in roster_df.iterrows()}
     
     for _, row in roster_df.iterrows():
@@ -192,17 +192,13 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 errors.append(f"{date_str}: {name_missing} no tiene cobertura válida (Regla Máx 2T).")
                 continue
             
-            # --- CAMBIO V3.9: DESEMPATE DOBLE NIVEL ---
-            # 1. Prioridad: Turno menos cargado
-            # 2. Prioridad: Persona menos cargada (dentro de ese turno)
-            # 3. Random: Para romper empates perfectos
-            
+            # DESEMPATE DOBLE: 1. Turno, 2. Persona, 3. Random
             def sort_key(cand_name):
                 cand_turn = name_to_turn[cand_name]
                 return (
-                    turn_coverage_counters[cand_turn],  # Nivel 1: Justicia de Turno
-                    person_coverage_counters[cand_name],# Nivel 2: Justicia Individual
-                    random.random()                     # Nivel 3: Ruido aleatorio
+                    turn_coverage_counters[cand_turn],
+                    person_coverage_counters[cand_name],
+                    random.random()
                 )
             
             valid_candidates.sort(key=sort_key)
@@ -325,9 +321,6 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 
     ws3 = wb.create_sheet("Resumen Solicitudes")
     ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados", "Días Relleno (Automático)"])
-    ws3.column_dimensions['A'].width = 20
-    ws3.column_dimensions['D'].width = 50
-    ws3.column_dimensions['E'].width = 50
     for _, p in roster_df.iterrows():
         name = p['Nombre']
         person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
@@ -368,10 +361,11 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V3.9")
+st.set_page_config(layout="wide", page_title="Gestor V4.0")
 
-st.title("🚒 Gestor Integral V3.9 (Equilibrio Individual)")
+st.title("🚒 Gestor Integral V4.0 (Nocturnas Excel)")
 
+# 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
 with c1:
     with st.expander("1. Configuración de Plantilla", expanded=False):
@@ -391,13 +385,42 @@ with c1:
         st.session_state.roster_data = edited_df
 
 with c2:
-    with st.expander("🌑 Periodos Nocturnos", expanded=False):
+    with st.expander("🌑 Periodos Nocturnos (Gris)", expanded=False):
         if 'nights' not in st.session_state: st.session_state.nights = []
+        
+        # MANUAL
         dn_start = st.date_input("Inicio Noche", value=None)
         dn_end = st.date_input("Fin Noche", value=None)
-        if st.button("Añadir Periodo"):
+        if st.button("Añadir Manual"):
             if dn_start and dn_end: st.session_state.nights.append((dn_start, dn_end))
+        
+        st.divider()
+        
+        # MASIVO EXCEL
+        st.write("📂 **Carga Masiva (Excel)**")
+        night_template = pd.DataFrame({"Inicio": [], "Fin": []})
+        buf_night = io.BytesIO()
+        with pd.ExcelWriter(buf_night, engine='openpyxl') as writer:
+            night_template.to_excel(writer, index=False)
+        st.download_button("⬇️ Plantilla Nocturnas", buf_night.getvalue(), "plantilla_nocturnas.xlsx")
+        
+        night_file = st.file_uploader("Sube Excel Nocturnas", type=['xlsx'], key="night_upload")
+        if night_file and st.button("Procesar Nocturnas"):
+            try:
+                df_n = pd.read_excel(night_file)
+                count_n = 0
+                for _, row in df_n.iterrows():
+                    if not pd.isnull(row['Inicio']) and not pd.isnull(row['Fin']):
+                        s = pd.to_datetime(row['Inicio']).date()
+                        e = pd.to_datetime(row['Fin']).date()
+                        st.session_state.nights.append((s, e))
+                        count_n += 1
+                st.success(f"Añadidos {count_n} periodos.")
+                st.rerun()
+            except Exception as ex: st.error(f"Error: {ex}")
+
         if st.session_state.nights:
+            st.write("--- Activos ---")
             for i, (s, e) in enumerate(st.session_state.nights):
                 col_del, col_tx = st.columns([1,4])
                 if col_del.button("x", key=f"n_{i}"):
@@ -405,6 +428,7 @@ with c2:
                     st.rerun()
                 col_tx.text(f"{s.strftime('%d/%m')} - {e.strftime('%d/%m')}")
 
+# 2. GESTOR
 st.divider()
 col_main, col_list = st.columns([2, 1])
 names_list = edited_df['Nombre'].tolist()
@@ -415,7 +439,7 @@ if 'requests' not in st.session_state: st.session_state.requests = []
 credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
 
 with col_main:
-    with st.expander("📂 Carga Masiva Horizontal"):
+    with st.expander("📂 Carga Masiva Vacaciones"):
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
         for i in range(1, 21): 
             template_df[f'Inicio {i}'] = ""
@@ -423,9 +447,9 @@ with col_main:
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             template_df.to_excel(writer, index=False)
-        st.download_button("⬇️ Descargar Plantilla", buffer.getvalue(), "plantilla_h.xlsx")
+        st.download_button("⬇️ Descargar Plantilla Vacaciones", buffer.getvalue(), "plantilla_vacaciones.xlsx")
         
-        uploaded_file = st.file_uploader("Sube Excel", type=['xlsx'])
+        uploaded_file = st.file_uploader("Sube Excel Vacaciones", type=['xlsx'])
         if uploaded_file and st.button("Procesar Archivo"):
             try:
                 df_upload = pd.read_excel(uploaded_file)
@@ -522,4 +546,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V3.9_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V4.0_{year_val}.xlsx")
