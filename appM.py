@@ -136,7 +136,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     day_vacations = {i: [] for i in range(total_days)}
     daily_error_codes = {} 
     
-    # Contar naturales para no pasarnos en el relleno
     natural_days_count = {name: 0 for name in roster_df['Nombre']}
 
     for req in requests:
@@ -237,19 +236,12 @@ def validate_and_generate(roster_df, requests, year, night_periods):
 # 4. MOTOR AUTO-SOLVER (IA CAMALEÓN V7.0)
 # -------------------------------------------------------------------
 def detect_vacation_pattern(requests):
-    """
-    Analiza el ADN de las solicitudes:
-    - Retorna: 'block_large' (>7 dias), 'block_medium' (3-7 dias), 'scattered' (<3 dias)
-    """
-    if not requests: return 'scattered' # Default
-    
+    if not requests: return 'scattered'
     durations = []
     for r in requests:
         dur = (r['Fin'] - r['Inicio']).days + 1
         durations.append(dur)
-    
     avg_dur = sum(durations) / len(durations)
-    
     if avg_dur >= 8: return 'block_large'
     elif avg_dur >= 4: return 'block_medium'
     else: return 'scattered'
@@ -283,19 +275,15 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     
-    # Llenar mapa con lo existente
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
         
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
-    # Orden aleatorio para no favorecer siempre al mismo en el relleno
     random.shuffle(people) 
-    
     all_days = [datetime.date(year, 1, 1) + datetime.timedelta(days=i) for i in range(total_days)]
     
     for p in people:
-        # 1. Análisis de Estado Actual
         credits_got = 0
         natural_days_got = 0
         person_reqs = [r for r in final_requests if r['Nombre'] == p['Nombre']]
@@ -310,38 +298,25 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                     
         if credits_got >= 13: continue
         
-        # 2. Detectar ADN
         pattern = detect_vacation_pattern(person_reqs)
-        
-        # 3. Bucle de Relleno
         attempts = 0
+        
         while credits_got < 13 and attempts < 500:
-            # Determinar duración del bloque a buscar según ADN
-            duration = 1 # Default scattered
-            if pattern == 'block_large':
-                duration = random.randint(7, 13)
-            elif pattern == 'block_medium':
-                duration = random.randint(4, 7)
-            else:
-                duration = 1 # scattered
-                
-            # Ajuste fino: Si faltan pocos creditos/dias, reducir bloque
+            duration = 1
+            if pattern == 'block_large': duration = random.randint(7, 13)
+            elif pattern == 'block_medium': duration = random.randint(4, 7)
+            
             if natural_days_got + duration > 39:
-                # Intentar reducir para encajar
                 remaining_nat = 39 - natural_days_got
-                if remaining_nat <= 0: break # Ya no caben más días naturales
+                if remaining_nat <= 0: break
                 duration = random.randint(1, remaining_nat)
             
             day = random.choice(all_days)
-            
-            # Optimización: Buscar que empiece en T para gastar crédito (si es lo que buscamos)
-            # Si nos sobran naturales pero faltan creditos, priorizamos dias T
             d_idx = day.timetuple().tm_yday - 1
             is_start_T = (base_schedule_turn[p['Turno']][d_idx] == 'T')
             
             if not is_start_T and duration == 1:
-                attempts += 1
-                continue # En modo scattered, solo queremos T efectivos
+                attempts += 1; continue
 
             req = {"Nombre": p['Nombre'], "Inicio": day, "Fin": day + datetime.timedelta(days=duration-1)}
             
@@ -349,27 +324,23 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                 overlap = False
                 for r in final_requests:
                     if r['Nombre'] == p['Nombre']:
-                         # Check simple overlap
                         if not (req['Inicio'] > r['Fin'] or req['Fin'] < r['Inicio']): overlap = True
                 
                 if not overlap:
                     book_request(req, occupation_map, base_schedule_turn, roster_df)
                     final_requests.append(req)
-                    
-                    # Update counters locally
                     natural_days_got += duration
                     s = req['Inicio'].timetuple().tm_yday - 1
                     e = req['Fin'].timetuple().tm_yday - 1
                     for d in range(s, e+1):
                         if base_schedule_turn[p['Turno']][d] == 'T': credits_got += 1
-            
             attempts += 1
             
     return final_requests
 
-# ... (Funciones de exportación se mantienen igual que V6.4/6.5) ...
-# Para ahorrar espacio, asumo que las funciones create_excel, generate_proposal_report, etc.
-# están presentes. He incluido el bloque completo abajo para copiar/pegar directo.
+# -------------------------------------------------------------------
+# 3. EXPORTADORES
+# -------------------------------------------------------------------
 
 def generate_proposal_report(proposal_data, valid_requests, roster_df):
     wb = Workbook()
@@ -390,6 +361,23 @@ def generate_proposal_report(proposal_data, valid_requests, roster_df):
             for c in range(1, 8): ws1.cell(curr, c).fill = fill_green
     ws1.column_dimensions['A'].width = 20; ws1.column_dimensions['G'].width = 40
     ws2 = wb.create_sheet("Datos Listos para Subir")
+    h_headers = ["ID_Puesto", "Nombre"]
+    for i in range(1, 21): h_headers.extend([f"Inicio {i}", f"Fin {i}"])
+    ws2.append(h_headers)
+    sorted_reqs = sorted(valid_requests, key=lambda x: x['Nombre'])
+    for _, person in roster_df.iterrows():
+        p_name = person['Nombre']; p_id = person['ID_Puesto']
+        p_reqs = [r for r in sorted_reqs if r['Nombre'] == p_name]
+        p_reqs.sort(key=lambda x: x['Inicio'])
+        row_data = [p_id, p_name]
+        for r in p_reqs: row_data.append(r['Inicio']); row_data.append(r['Fin'])
+        ws2.append(row_data)
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
+
+def generate_clean_import_excel(valid_requests, roster_df):
+    wb = Workbook()
+    ws2 = wb.active; ws2.title = "Datos Listos para Subir"
     h_headers = ["ID_Puesto", "Nombre"]
     for i in range(1, 21): h_headers.extend([f"Inicio {i}", f"Fin {i}"])
     ws2.append(h_headers)
@@ -485,35 +473,12 @@ def generate_visual_error_report(schedule, roster_df, year, night_periods, error
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
-def generate_error_report(df_original, errors_dict):
-    wb = Workbook()
-    fill_red = PatternFill("solid", fgColor="FFC7CE"); font_red = Font(color="9C0006")
-    ws1 = wb.active; ws1.title = "Datos con Errores"
-    headers = list(df_original.columns) + ["ERROR"]
-    ws1.append(headers)
-    for idx, row in df_original.iterrows():
-        row_data = row.tolist()
-        if idx in errors_dict:
-            row_data.append(errors_dict[idx])
-            ws1.append(row_data); current_row = ws1.max_row
-            for col in range(1, len(row_data) + 1):
-                cell = ws1.cell(row=current_row, column=col); cell.fill = fill_red; cell.font = font_red
-        else: row_data.append("OK"); ws1.append(row_data)
-    ws2 = wb.create_sheet("Log"); ws2.append(["Fila", "Error"])
-    for idx, msg in errors_dict.items(): ws2.append([f"Fila {idx + 2}", msg])
-    out = io.BytesIO(); wb.save(out); out.seek(0)
-    return out
-
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
     wb = Workbook()
-    s_T = PatternFill("solid", fgColor="C6EFCE") 
-    s_V = PatternFill("solid", fgColor="FFEB9C") 
-    s_VR = PatternFill("solid", fgColor="FFFFE0") 
-    s_Cov = PatternFill("solid", fgColor="FFC7CE") 
-    s_L = PatternFill("solid", fgColor="F2F2F2") 
-    s_Night = PatternFill("solid", fgColor="A6A6A6") 
-    font_bold = Font(bold=True)
-    font_red = Font(color="9C0006", bold=True)
+    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFEB9C")
+    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE")
+    s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
+    font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
     align_c = Alignment(horizontal="center", vertical="center")
     border_thin = Side(border_style="thin", color="000000")
     border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
@@ -570,12 +535,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Días (T+T*)", "Noches Trab.", "Total Vacs (Nat)"]
     ws2.append(headers)
     for _, p in roster_df.iterrows():
-        name = p['Nombre']
-        sch = schedule[name]
+        name = p['Nombre']; sch = schedule[name]
         base_sch_turn, _ = generate_base_schedule(year)
         original_ts = base_sch_turn[p['Turno']].count('T')
-        v_credits = sch.count('V')
-        t_cover = counters[name]
+        v_credits = sch.count('V'); t_cover = counters[name]
         total_work = (original_ts - v_credits) + t_cover
         v_natural = sch.count('V') + sch.count('V(L)') + sch.count('V(R)')
         nights_worked = 0
@@ -620,9 +583,9 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V7.0")
+st.set_page_config(layout="wide", page_title="Gestor V7.1")
 
-st.title("🚒 Gestor Integral V7.0 (IA Camaleón + Límite 39)")
+st.title("🚒 Gestor Integral V7.1")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -646,6 +609,7 @@ with c1:
 with c2:
     with st.expander("🌑 Periodos Nocturnos", expanded=True):
         if 'nights' not in st.session_state: st.session_state.nights = []
+        
         c_dn1, c_dn2 = st.columns(2)
         dn_start = c_dn1.date_input("Inicio", value=None, label_visibility="collapsed")
         dn_end = c_dn2.date_input("Fin", value=None, label_visibility="collapsed")
@@ -699,7 +663,7 @@ if 'proposal_data' not in st.session_state: st.session_state.proposal_data = Non
 if 'error_report_data' not in st.session_state: st.session_state.error_report_data = None
 
 with col_main:
-    # --- IA SOLVER V6.5/V7.0 ---
+    # --- IA SOLVER V7.0 ---
     with st.expander("🤖 Auto-Solver & Negociador (IA)", expanded=True):
         st.info("Sube tus vacaciones. La IA arregla conflictos y rellena imitando tu estilo.")
         uploaded_solver = st.file_uploader("Sube Excel Vacaciones", type=['xlsx'], key="solver_up")
@@ -752,7 +716,8 @@ with col_main:
 
     with st.expander("📂 Carga Masiva Horizontal"):
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
-        for i in range(1, 21): template_df[f'Inicio {i}'] = ""; template_df[f'Fin {i}'] = ""
+        for i in range(1, 21): 
+            template_df[f'Inicio {i}'] = ""; template_df[f'Fin {i}'] = ""
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer: template_df.to_excel(writer, index=False)
         st.download_button("⬇️ Descargar Plantilla", buffer.getvalue(), "plantilla_h.xlsx")
@@ -765,7 +730,8 @@ with col_main:
                 for idx, row in df_upload.iterrows():
                     target_name = None
                     if 'ID_Puesto' in row and not pd.isnull(row['ID_Puesto']):
-                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]; if not match.empty: target_name = match.iloc[0]['Nombre']
+                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
+                        if not match.empty: target_name = match.iloc[0]['Nombre']
                     if not target_name and 'Nombre' in row:
                         if row['Nombre'] in names_list: target_name = row['Nombre']
                     if not target_name:
@@ -850,4 +816,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             st.download_button("📥 Descargar Mapa de Conflictos (Excel Rojo)", error_excel, "Conflictos_Visuales.xlsx")
         else:
             st.success("✅ Éxito"); excel_data = create_final_excel(final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log)
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.0_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.1_{year_val}.xlsx")
