@@ -223,7 +223,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log, daily_error_codes
 
 # -------------------------------------------------------------------
-# 4. MOTOR AUTO-SOLVER Y REPARADOR
+# 4. MOTOR REPARADOR (V6.3)
 # -------------------------------------------------------------------
 def check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days):
     start_idx = req['Inicio'].timetuple().tm_yday - 1
@@ -249,16 +249,13 @@ def book_request(req, occupation_map, base_schedule_turn, roster_df):
         if base_schedule_turn[person['Turno']][d] == 'T':
             occupation_map[d].append(person)
 
-def generate_proposal_report(proposal_data, valid_requests, roster_df):
-    """
-    Genera el Excel de Propuesta (Comparativa + Hoja Lista para Subir).
-    """
+def generate_negotiation_excel(proposal_data):
+    """Genera SOLO el informe de negociación (Comparativa)."""
     wb = Workbook()
     fill_orange = PatternFill("solid", fgColor="FFD966")
     fill_green = PatternFill("solid", fgColor="C6EFCE")
     font_bold = Font(bold=True)
     
-    # Hoja 1: Comparativa
     ws1 = wb.active; ws1.title = "Comparativa de Ajustes"
     headers = ["Nombre", "Inicio Original", "Fin Original", "Inicio Propuesto", "Fin Propuesto", "Estado", "Motivo"]
     ws1.append(headers)
@@ -283,37 +280,30 @@ def generate_proposal_report(proposal_data, valid_requests, roster_df):
             
     ws1.column_dimensions['A'].width = 20
     ws1.column_dimensions['G'].width = 40
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
 
-    # --- HOJA 2: DATOS LISTOS PARA SUBIR (RECONSTRUCCIÓN HORIZONTAL) ---
-    ws2 = wb.create_sheet("Datos Listos para Subir")
-    
-    # Cabecera Horizontal (hasta 20 periodos)
+def generate_clean_import_excel(valid_requests, roster_df):
+    """Genera SOLO el Excel limpio horizontal para importar."""
+    wb = Workbook()
+    ws2 = wb.active; ws2.title = "Datos Listos para Subir"
     h_headers = ["ID_Puesto", "Nombre"]
     for i in range(1, 21):
         h_headers.extend([f"Inicio {i}", f"Fin {i}"])
     ws2.append(h_headers)
     
-    # Agrupar valid_requests por persona
-    # valid_requests es una lista de dicts: {'Nombre': 'X', 'Inicio': Y, 'Fin': Z}
     sorted_reqs = sorted(valid_requests, key=lambda x: x['Nombre'])
     
-    # Para cada persona en el roster original (para mantener orden)
     for _, person in roster_df.iterrows():
         p_name = person['Nombre']
         p_id = person['ID_Puesto']
-        
-        # Buscar sus vacaciones validas
         p_reqs = [r for r in sorted_reqs if r['Nombre'] == p_name]
-        # Ordenar cronológicamente
         p_reqs.sort(key=lambda x: x['Inicio'])
         
         row_data = [p_id, p_name]
-        
-        # Rellenar columnas de fechas
         for r in p_reqs:
             row_data.append(r['Inicio'])
             row_data.append(r['Fin'])
-            
         ws2.append(row_data)
 
     out = io.BytesIO(); wb.save(out); out.seek(0)
@@ -322,10 +312,8 @@ def generate_proposal_report(proposal_data, valid_requests, roster_df):
 def smart_repair_requests(roster_df, imported_requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
-    
     proposal_data = []
     final_valid_requests = []
-    
     imported_requests.sort(key=lambda x: x['Nombre'])
 
     for req in imported_requests:
@@ -344,10 +332,8 @@ def smart_repair_requests(roster_df, imported_requests, year, night_periods):
             original_start = req['Inicio']
             duration = (req['Fin'] - req['Inicio']).days + 1
             found_fix = False
-            
             shifts = []
-            for i in range(1, 16): 
-                shifts.append(i); shifts.append(-i)
+            for i in range(1, 16): shifts.append(i); shifts.append(-i)
             
             for delta in shifts:
                 new_start = original_start + datetime.timedelta(days=delta)
@@ -382,10 +368,8 @@ def smart_repair_requests(roster_df, imported_requests, year, night_periods):
 def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
-    
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
-        
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
     people.sort(key=lambda x: x['Turno'])
@@ -399,9 +383,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                 e_idx = r['Fin'].timetuple().tm_yday - 1
                 for d in range(s_idx, e_idx + 1):
                     if base_schedule_turn[p['Turno']][d] == 'T': credits_got += 1
-                    
         if credits_got >= 13: continue
-        
         attempts = 0
         while credits_got < 13 and attempts < 200:
             day = random.choice(all_days)
@@ -420,7 +402,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     return final_requests
 
 # -------------------------------------------------------------------
-# 3. EXPORTADORES
+# 3. EXPORTADORES GENERALES (ERROR, CUADRANTE)
 # -------------------------------------------------------------------
 def generate_visual_error_report(schedule, roster_df, year, night_periods, error_heatmap, text_errors):
     wb = Workbook()
@@ -642,9 +624,9 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V6.4")
+st.set_page_config(layout="wide", page_title="Gestor V6.5")
 
-st.title("🚒 Gestor Integral V6.4 (Negociador + Reconstrucción)")
+st.title("🚒 Gestor Integral V6.5")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -716,14 +698,16 @@ year_val = st.number_input("Año", value=today.year + 1)
 if 'requests' not in st.session_state: st.session_state.requests = []
 credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
 
+# INICIALIZAR ESTADO DE PROPUESTA
+if 'pending_proposal' not in st.session_state: st.session_state.pending_proposal = None
+if 'proposal_data' not in st.session_state: st.session_state.proposal_data = None
+
 with col_main:
-    # --- IA SOLVER V6.4 ---
+    # --- IA SOLVER V6.5 (ACEPTAR Y DESCARGAS SEPARADAS) ---
     with st.expander("🤖 Auto-Solver & Negociador (IA)", expanded=True):
         st.info("Sube tus vacaciones conflictivas. La IA propondrá ajustes mínimos.")
         
         uploaded_solver = st.file_uploader("Sube Excel Vacaciones", type=['xlsx'], key="solver_up")
-        
-        if 'proposal_report' not in st.session_state: st.session_state.proposal_report = None
         
         if uploaded_solver and st.button("✨ Analizar y Generar Propuesta"):
             try:
@@ -750,15 +734,47 @@ with col_main:
                 with st.spinner("Negociando fechas..."):
                     # 1. Reparar lo importado
                     fixed_reqs, proposal_data = smart_repair_requests(edited_df, imported_reqs, year_val, st.session_state.nights)
-                    # 2. Generar Excel Propuesta CON HOJA LISTA PARA SUBIR (V6.4)
-                    st.session_state.proposal_report = generate_proposal_report(proposal_data, fixed_reqs, edited_df)
-                    
-                st.success("¡Propuesta lista!")
+                    # 2. Rellenar huecos restantes
+                    final_reqs = run_auto_solver_fill(edited_df, year_val, st.session_state.nights, fixed_reqs)
+                
+                # GUARDAR EN ESTADO PENDIENTE
+                st.session_state.pending_proposal = final_reqs
+                st.session_state.proposal_data = proposal_data
+                st.success("¡Propuesta generada! Revisa abajo.")
                 
             except Exception as ex: st.error(f"Error: {ex}")
 
-        if st.session_state.proposal_report:
-             st.download_button("📥 Descargar Documento de Propuesta", st.session_state.proposal_report, "Propuesta_Ajustes.xlsx")
+        # MOSTRAR BOTONES SI HAY PROPUESTA PENDIENTE
+        if st.session_state.pending_proposal:
+            st.markdown("---")
+            st.write("### 🎯 Acciones sobre la Propuesta")
+            
+            c_accept, c_dl1, c_dl2 = st.columns(3)
+            
+            if c_accept.button("✅ Aceptar Propuesta y Cargar", type="primary"):
+                st.session_state.requests = st.session_state.pending_proposal
+                st.session_state.pending_proposal = None # Limpiar tras aceptar
+                st.session_state.proposal_data = None
+                st.success("¡Cargado! Ahora puedes generar el Excel Final.")
+                st.rerun()
+            
+            # Generar Excels al vuelo para descargar
+            excel_negotiation = generate_negotiation_excel(st.session_state.proposal_data)
+            excel_clean = generate_clean_import_excel(st.session_state.pending_proposal, edited_df)
+            
+            c_dl1.download_button(
+                "📄 Descargar Informe Negociación", 
+                excel_negotiation, 
+                "Informe_Negociacion.xlsx",
+                help="Excel con colores mostrando qué fechas se han movido."
+            )
+            
+            c_dl2.download_button(
+                "💾 Descargar Fichero Limpio", 
+                excel_clean, 
+                "Importacion_Limpia.xlsx",
+                help="Excel en formato horizontal listo para importar de nuevo."
+            )
 
     st.subheader("2. Añadir Solicitud Manual")
     sel_name = st.selectbox("Trabajador", names_list)
@@ -849,4 +865,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             excel_data = create_final_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V6.4_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V6.5_{year_val}.xlsx")
