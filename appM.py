@@ -436,3 +436,379 @@ def generate_visual_error_report(schedule, roster_df, year, night_periods, error
     ws2 = wb.create_sheet("Lista de Errores")
     ws2.column_dimensions['A'].width = 80
     ws2.append(["Descripción del Conflicto"])
+    for err in text_errors:
+        ws2.append([err])
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
+
+def generate_error_report(df_original, errors_dict):
+    wb = Workbook()
+    fill_red = PatternFill("solid", fgColor="FFC7CE")
+    font_red = Font(color="9C0006")
+    ws1 = wb.active; ws1.title = "Datos con Errores"
+    headers = list(df_original.columns) + ["ERROR"]
+    ws1.append(headers)
+    for idx, row in df_original.iterrows():
+        row_data = row.tolist()
+        if idx in errors_dict:
+            row_data.append(errors_dict[idx])
+            ws1.append(row_data)
+            current_row = ws1.max_row
+            for col in range(1, len(row_data) + 1):
+                cell = ws1.cell(row=current_row, column=col)
+                cell.fill = fill_red
+                cell.font = font_red
+        else:
+            row_data.append("OK"); ws1.append(row_data)
+    ws2 = wb.create_sheet("Log"); ws2.append(["Fila", "Error"])
+    for idx, msg in errors_dict.items(): ws2.append([f"Fila {idx + 2}", msg])
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
+
+def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
+    wb = Workbook()
+    s_T = PatternFill("solid", fgColor="C6EFCE") 
+    s_V = PatternFill("solid", fgColor="FFEB9C") 
+    s_VR = PatternFill("solid", fgColor="FFFFE0") 
+    s_Cov = PatternFill("solid", fgColor="FFC7CE") 
+    s_L = PatternFill("solid", fgColor="F2F2F2") 
+    s_Night = PatternFill("solid", fgColor="A6A6A6") 
+    font_bold = Font(bold=True)
+    font_red = Font(color="9C0006", bold=True)
+    align_c = Alignment(horizontal="center", vertical="center")
+    border_thin = Side(border_style="thin", color="000000")
+    border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+
+    ws1 = wb.active; ws1.title = "Cuadrante"
+    ws1.column_dimensions['A'].width = 15
+    for i in range(2, 34): ws1.column_dimensions[get_column_letter(i)].width = 4
+    current_row = 1
+    for t in TEAMS:
+        ws1.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=32)
+        cell_title = ws1.cell(current_row, 1, f"TURNO {t}")
+        cell_title.font = Font(bold=True, size=14, color="FFFFFF")
+        cell_title.fill = PatternFill("solid", fgColor="000080")
+        cell_title.alignment = align_c
+        current_row += 2
+        team_members = roster_df[roster_df['Turno'] == t]
+        for _, p in team_members.iterrows():
+            name = p['Nombre']; role = p['Rol']
+            ws1.cell(current_row, 1, f"{name} ({role})").font = font_bold
+            for d in range(1, 32):
+                c = ws1.cell(current_row, d+1, d); c.alignment = align_c; c.font = font_bold; c.border = border_all; c.fill = PatternFill("solid", fgColor="E0E0E0")
+            current_row += 1
+            for m_idx, mes in enumerate(MESES):
+                month_num = m_idx + 1
+                ws1.cell(current_row, 1, mes).font = font_bold; ws1.cell(current_row, 1).border = border_all
+                days_in_month = calendar.monthrange(year, month_num)[1]
+                for d in range(1, 32):
+                    cell = ws1.cell(current_row, d+1); cell.border = border_all; cell.alignment = align_c
+                    if d <= days_in_month:
+                        date_obj = datetime.date(year, month_num, d)
+                        day_of_year = date_obj.timetuple().tm_yday - 1
+                        status = schedule[name][day_of_year]
+                        val = ""; fill = s_L 
+                        if status == 'T': val = "T"; fill = s_T
+                        elif status == 'V': val = "V"; fill = s_V
+                        elif status == 'V(L)' or status == 'V(R)': val = "v"; fill = s_VR
+                        elif status.startswith('T*'):
+                            covered_name = status.split('(')[1][:-1]
+                            covered_p = roster_df[roster_df['Nombre'] == covered_name]
+                            abbr = "?"
+                            if not covered_p.empty:
+                                c_role = covered_p.iloc[0]['ID_Puesto']
+                                c_turn = covered_p.iloc[0]['Turno']
+                                if "Subjefe" in c_role: abbr = f"S{c_turn}"
+                                elif "Jefe" in c_role: abbr = f"J{c_turn}"
+                                elif "Cond" in c_role: abbr = f"C{c_turn}"
+                                elif "Bombero" in c_role: abbr = c_role.split()[-1]
+                                else: abbr = f"?{c_turn}"
+                            val = abbr; fill = s_Cov; cell.font = font_red
+                        if is_in_night_period(day_of_year, year, night_periods): fill = s_Night
+                        cell.value = val; cell.fill = fill
+                    else: cell.fill = PatternFill("solid", fgColor="808080")
+                current_row += 1
+            current_row += 2 
+
+    ws2 = wb.create_sheet("Estadísticas")
+    ws2.column_dimensions['A'].width = 20
+    headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Días (T+T*)", "Noches Trab.", "Total Vacs (Nat)"]
+    ws2.append(headers)
+    for _, p in roster_df.iterrows():
+        name = p['Nombre']
+        sch = schedule[name]
+        base_sch_turn, _ = generate_base_schedule(year)
+        original_ts = base_sch_turn[p['Turno']].count('T')
+        v_credits = sch.count('V')
+        t_cover = counters[name]
+        total_work = (original_ts - v_credits) + t_cover
+        v_natural = sch.count('V') + sch.count('V(L)') + sch.count('V(R)')
+        nights_worked = 0
+        for d_idx, s in enumerate(sch):
+            is_working = s == 'T' or s.startswith('T*')
+            if is_working and is_in_night_period(d_idx, year, night_periods): nights_worked += 1
+        ws2.append([name, p['Turno'], p['Rol'], v_credits, t_cover, total_work, nights_worked, v_natural])
+
+    ws3 = wb.create_sheet("Resumen Solicitudes")
+    ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados", "Días Relleno (Automático)"])
+    for _, p in roster_df.iterrows():
+        name = p['Nombre']
+        person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
+        req_str = " | ".join(person_reqs) if person_reqs else "Sin solicitudes"
+        fill_dates = fill_log[name]
+        fill_str = "Ninguno"
+        if fill_dates:
+            date_ranges = []
+            fill_dates.sort()
+            if fill_dates:
+                range_start = fill_dates[0]
+                range_end = fill_dates[0]
+                for i in range(1, len(fill_dates)):
+                    if (fill_dates[i] - fill_dates[i-1]).days == 1:
+                        range_end = fill_dates[i]
+                    else:
+                        if range_start == range_end:
+                            date_ranges.append(range_start.strftime('%d/%m'))
+                        else:
+                            date_ranges.append(f"{range_start.strftime('%d/%m')}-{range_end.strftime('%d/%m')}")
+                        range_start = fill_dates[i]
+                        range_end = fill_dates[i]
+                if range_start == range_end:
+                    date_ranges.append(range_start.strftime('%d/%m'))
+                else:
+                    date_ranges.append(f"{range_start.strftime('%d/%m')}-{range_end.strftime('%d/%m')}")
+            fill_str = ", ".join(date_ranges)
+        ws3.append([name, p['Turno'], p['Rol'], req_str, fill_str])
+
+    ws4 = wb.create_sheet("Ajustes de Vacaciones")
+    ws4.append(["Fecha", "Trabajador (Cubre)", "Cubre a (Ausente)", "Puesto Ausente"])
+    adjustments_log.sort(key=lambda x: x[0])
+    for day_idx, coverer, missing in adjustments_log:
+        date_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=day_idx)
+        missing_p = roster_df[roster_df['Nombre'] == missing]
+        if not missing_p.empty: missing_role = missing_p.iloc[0]['ID_Puesto']
+        else: missing_role = "Desconocido"
+        ws4.append([date_obj.strftime("%d/%m/%Y"), coverer, missing, missing_role])
+
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out
+
+# -------------------------------------------------------------------
+# INTERFAZ STREAMLIT
+# -------------------------------------------------------------------
+
+st.set_page_config(layout="wide", page_title="Gestor V6.2")
+
+st.title("🚒 Gestor Integral V6.2 (Reparador IA)")
+
+# 1. CONFIGURACIÓN
+c1, c2 = st.columns([2, 1])
+with c1:
+    with st.expander("1. Configuración de Plantilla", expanded=False):
+        if 'roster_data' not in st.session_state:
+            st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
+        edited_df = st.data_editor(
+            st.session_state.roster_data,
+            column_config={
+                "ID_Puesto": st.column_config.TextColumn(disabled=True),
+                "Turno": st.column_config.SelectboxColumn(options=TEAMS, required=True),
+                "Rol": st.column_config.SelectboxColumn(options=ROLES, required=True),
+                "SV": st.column_config.CheckboxColumn(label="¿Es SV?", help="Puede cubrir conductor")
+            },
+            num_rows="dynamic",
+            use_container_width=True
+        )
+        st.session_state.roster_data = edited_df
+
+with c2:
+    with st.expander("🌑 Periodos Nocturnos", expanded=True):
+        if 'nights' not in st.session_state: st.session_state.nights = []
+        
+        c_dn1, c_dn2 = st.columns(2)
+        dn_start = c_dn1.date_input("Inicio", value=None, label_visibility="collapsed")
+        dn_end = c_dn2.date_input("Fin", value=None, label_visibility="collapsed")
+        if st.button("Añadir Periodo"):
+            if dn_start and dn_end: st.session_state.nights.append((dn_start, dn_end))
+        
+        uploaded_n = st.file_uploader("Sube Excel Nocturnas", type=['xlsx'], key="n_up", label_visibility="collapsed")
+        if uploaded_n and st.button("Procesar Nocturnas"):
+            try:
+                df_n = pd.read_excel(uploaded_n)
+                added = 0
+                for _, row in df_n.iterrows():
+                    val_s = row.get('Inicio') if 'Inicio' in row else row.iloc[0]
+                    val_e = row.get('Fin') if 'Fin' in row else row.iloc[1]
+                    if pd.isnull(val_s) or pd.isnull(val_e): continue
+                    try:
+                        d_s = pd.to_datetime(val_s, dayfirst=True).date()
+                        d_e = pd.to_datetime(val_e, dayfirst=True).date()
+                        if d_s <= d_e:
+                            st.session_state.nights.append((d_s, d_e))
+                            added += 1
+                    except: pass 
+                st.success(f"Añadidos {added} periodos.")
+                st.rerun()
+            except Exception as e: st.error(f"Error: {e}")
+
+        with st.container(height=200):
+            if st.session_state.nights:
+                for i, (s, e) in enumerate(st.session_state.nights):
+                    col_del, col_tx = st.columns([1,5])
+                    if col_del.button("x", key=f"n_{i}"):
+                        st.session_state.nights.pop(i)
+                        st.rerun()
+                    col_tx.caption(f"{s.strftime('%d/%m')} - {e.strftime('%d/%m')}")
+            else:
+                st.caption("Sin periodos.")
+
+# 2. GESTOR
+st.divider()
+col_main, col_list = st.columns([2, 1])
+names_list = edited_df['Nombre'].tolist()
+today = datetime.date.today()
+year_val = st.number_input("Año", value=today.year + 1)
+
+if 'requests' not in st.session_state: st.session_state.requests = []
+credits_map = calculate_spent_credits(edited_df, st.session_state.requests, year_val)
+
+with col_main:
+    # --- IA SOLVER V6.2 + REPAIR ---
+    with st.expander("🤖 Auto-Solver & Reparador Inteligente", expanded=True):
+        st.info("Sube tus vacaciones y la IA intentará arreglar conflictos moviendo fechas.")
+        
+        # 1. Carga Masiva para Solver
+        uploaded_solver = st.file_uploader("Sube Excel Vacaciones", type=['xlsx'], key="solver_up")
+        
+        if uploaded_solver and st.button("✨ Analizar y Reparar"):
+            try:
+                df_up = pd.read_excel(uploaded_solver)
+                imported_reqs = []
+                for _, row in df_up.iterrows():
+                    # Parsing robusto
+                    target_name = None
+                    if 'ID_Puesto' in row: 
+                         m = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
+                         if not m.empty: target_name = m.iloc[0]['Nombre']
+                    if not target_name and 'Nombre' in row:
+                         if row['Nombre'] in names_list: target_name = row['Nombre']
+                    
+                    if target_name:
+                        for i in range(1, 21):
+                            col_s = f"Inicio {i}"; col_e = f"Fin {i}"
+                            if col_s in row and col_e in row and not pd.isnull(row[col_s]):
+                                try:
+                                    s = pd.to_datetime(row[col_s], dayfirst=True).date()
+                                    e = pd.to_datetime(row[col_e], dayfirst=True).date()
+                                    imported_reqs.append({"Nombre": target_name, "Inicio": s, "Fin": e})
+                                except: pass
+                
+                # Ejecutar Reparación
+                with st.spinner("Reparando conflictos y rellenando huecos..."):
+                    fixed_reqs, logs = smart_repair_requests(edited_df, imported_reqs, year_val, st.session_state.nights)
+                    # Ejecutar Relleno Final
+                    final_reqs = run_auto_solver_fill(edited_df, year_val, st.session_state.nights, fixed_reqs)
+                
+                st.session_state.requests = final_reqs
+                st.session_state.repair_logs = logs
+                st.success("¡Proceso completado!")
+                st.rerun()
+                
+            except Exception as ex: st.error(f"Error: {ex}")
+
+        if 'repair_logs' in st.session_state and st.session_state.repair_logs:
+            st.warning(f"⚠️ Se realizaron {len(st.session_state.repair_logs)} ajustes:")
+            for log in st.session_state.repair_logs:
+                st.caption(log)
+
+    st.subheader("2. Añadir Solicitud Manual")
+    sel_name = st.selectbox("Trabajador", names_list)
+    if sel_name:
+        spent = credits_map.get(sel_name, 0)
+        st.progress(min(spent/13, 1.0), text=f"Créditos T: {spent} / 13")
+        
+        row_p = edited_df[edited_df['Nombre'] == sel_name].iloc[0]
+        base_sch, _ = generate_base_schedule(year_val)
+        my_sch = base_sch[row_p['Turno']]
+        view_months = list(range(1, 13))
+        
+        html_cal = "<div style='display:flex; flex-wrap:wrap; gap:5px; margin-bottom:10px;'>"
+        for m in view_months:
+            html_cal += f"<div style='border:1px solid #ddd; padding:2px; border-radius:3px; width:100px;'><strong>{MESES[m-1]}</strong>"
+            days_in_m = calendar.monthrange(year_val, m)[1]
+            html_cal += "<div style='display:grid; grid-template-columns:repeat(7, 1fr); gap:1px; font-size:9px; text-align:center;'>"
+            for d in range(1, days_in_m + 1):
+                dt = datetime.date(year_val, m, d)
+                d_idx = dt.timetuple().tm_yday - 1
+                status = my_sch[d_idx]
+                color = "#C6EFCE" if status == 'T' else "#F2F2F2"
+                border = "2px solid #555" if is_in_night_period(d_idx, year_val, st.session_state.nights) else "1px solid #eee"
+                html_cal += f"<div style='background-color:{color}; padding:1px; border:{border}'>{d}</div>"
+            html_cal += "</div></div>"
+        html_cal += "</div>"
+        st.markdown(html_cal, unsafe_allow_html=True)
+
+    d_range = st.date_input("Selecciona Rango", [], help="Inicio - Fin")
+    if st.button("Añadir Periodo", use_container_width=True):
+        if len(d_range) == 2:
+            start, end = d_range
+            conflict = False
+            if is_night_restricted(start, st.session_state.nights) or is_night_restricted(end, st.session_state.nights):
+                st.error("⛔ Conflicto periodo nocturno.")
+                conflict = True
+            if not conflict:
+                st.session_state.requests.append({"Nombre": sel_name, "Inicio": start, "Fin": end})
+                st.success(f"Añadido: {sel_name}")
+                st.rerun()
+        else: st.warning("Selecciona fechas.")
+
+# --- LISTA LIMPIA ---
+with col_list:
+    st.subheader("Listado Solicitudes")
+    
+    if st.session_state.requests:
+        indexed_requests = []
+        for i, r in enumerate(st.session_state.requests):
+            r_with_index = r.copy()
+            r_with_index['idx'] = i
+            indexed_requests.append(r_with_index)
+        indexed_requests.sort(key=lambda x: x['Nombre'])
+        grouped_reqs = {}
+        for key, group in groupby(indexed_requests, lambda x: x['Nombre']):
+            grouped_reqs[key] = list(group)
+        for name, reqs in grouped_reqs.items():
+            with st.expander(f"{name} ({len(reqs)})"):
+                for r in reqs:
+                    c_txt, c_btn = st.columns([4, 1])
+                    c_txt.caption(f"{r['Inicio'].strftime('%d/%m')} - {r['Fin'].strftime('%d/%m')}")
+                    if c_btn.button("🗑️", key=f"del_{r['idx']}"):
+                        st.session_state.requests.pop(r['idx'])
+                        st.rerun()
+    else:
+        st.info("Sin solicitudes.")
+    if st.button("🗑️ Borrar TODO", type="secondary"):
+        st.session_state.requests = []
+        st.rerun()
+
+st.divider()
+if st.button("🚀 Generar Excel Final", type="primary", use_container_width=True):
+    if not st.session_state.requests:
+        st.error("Faltan solicitudes.")
+    else:
+        final_sch, errs, counters, fill_log, adjustments_log, err_heatmap = validate_and_generate(
+            edited_df, st.session_state.requests, year_val, st.session_state.nights
+        )
+        if errs:
+            st.error("❌ Conflictos en solicitudes actuales.")
+            for e in errs: st.write(f"- {e}")
+            error_excel = generate_visual_error_report(
+                final_sch, edited_df, year_val, st.session_state.nights, err_heatmap, errs
+            )
+            st.download_button("📥 Descargar Mapa de Conflictos (Excel Rojo)", error_excel, "Conflictos_Visuales.xlsx")
+        else:
+            st.success("✅ Éxito")
+            excel_data = create_final_excel(
+                final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log
+            )
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V6.2_{year_val}.xlsx")
