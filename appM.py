@@ -149,6 +149,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 final_schedule[name][d] = 'V(L)'
 
     errors = []
+    adjustments_log = []
     
     for d in range(total_days):
         absent_people = day_vacations[d]
@@ -203,7 +204,9 @@ def validate_and_generate(roster_df, requests, year, night_periods):
             chosen = valid_candidates[0]
             chosen_turn = name_to_turn[chosen]
             
-            final_schedule[chosen][d] = f"T*({person_row['Turno']})"
+            final_schedule[chosen][d] = f"T*({name_missing})"
+            adjustments_log.append((d, chosen, name_missing))
+            
             turn_coverage_counters[chosen_turn] += 1
             person_coverage_counters[chosen] += 1
 
@@ -222,25 +225,28 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                     added_dates.append(d_obj)
         fill_log[name] = added_dates
 
-    return final_schedule, errors, person_coverage_counters, fill_log
+    return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log
 
 # -------------------------------------------------------------------
 # 2. GENERACIÓN EXCEL
 # -------------------------------------------------------------------
-def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods):
+def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
     wb = Workbook()
+    
     s_T = PatternFill("solid", fgColor="C6EFCE") 
     s_V = PatternFill("solid", fgColor="FFEB9C") 
     s_VR = PatternFill("solid", fgColor="FFFFE0") 
     s_Cov = PatternFill("solid", fgColor="FFC7CE") 
     s_L = PatternFill("solid", fgColor="F2F2F2") 
     s_Night = PatternFill("solid", fgColor="A6A6A6") 
+    
     font_bold = Font(bold=True)
     font_red = Font(color="9C0006", bold=True)
     align_c = Alignment(horizontal="center", vertical="center")
     border_thin = Side(border_style="thin", color="000000")
     border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
+    # --- HOJA 1: CUADRANTE ---
     ws1 = wb.active
     ws1.title = "Cuadrante"
     ws1.column_dimensions['A'].width = 15
@@ -290,11 +296,38 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
                             val = "v"
                             fill = s_VR
                         elif status.startswith('T*'):
-                            val = status.split('(')[1][0] 
+                            # --- LOGICA ABREVIATURA MEJORADA ---
+                            covered_name = status.split('(')[1][:-1]
+                            covered_p = roster_df[roster_df['Nombre'] == covered_name]
+                            
+                            abbr = "?"
+                            if not covered_p.empty:
+                                c_role = covered_p.iloc[0]['ID_Puesto']
+                                c_turn = covered_p.iloc[0]['Turno']
+                                
+                                if "Subjefe" in c_role: 
+                                    letter = "S"
+                                    abbr = f"{letter}{c_turn}"
+                                elif "Jefe" in c_role: 
+                                    letter = "J"
+                                    abbr = f"{letter}{c_turn}"
+                                elif "Cond" in c_role: 
+                                    letter = "C"
+                                    abbr = f"{letter}{c_turn}"
+                                elif "Bombero" in c_role: 
+                                    # Cambio V5.1: Mostrar identificador específico (A1, B2...)
+                                    abbr = c_role.split()[-1]
+                                else: 
+                                    letter = "?"
+                                    abbr = f"{letter}{c_turn}"
+                            
+                            val = abbr
                             fill = s_Cov
                             cell.font = font_red
+                        
                         if is_in_night_period(day_of_year, year, night_periods):
                             fill = s_Night
+                        
                         cell.value = val
                         cell.fill = fill
                     else:
@@ -302,9 +335,11 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
                 current_row += 1
             current_row += 2 
 
+    # --- HOJA 2: ESTADÍSTICAS ---
     ws2 = wb.create_sheet("Estadísticas")
     ws2.column_dimensions['A'].width = 20
-    headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Días (T+T*)", "Total Vacs (Nat)"]
+    # Añadida columna noches
+    headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Días (T+T*)", "Noches Trab.", "Total Vacs (Nat)"]
     ws2.append(headers)
     for _, p in roster_df.iterrows():
         name = p['Nombre']
@@ -315,8 +350,17 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
         t_cover = counters[name]
         total_work = (original_ts - v_credits) + t_cover
         v_natural = sch.count('V') + sch.count('V(L)') + sch.count('V(R)')
-        ws2.append([name, p['Turno'], p['Rol'], v_credits, t_cover, total_work, v_natural])
+        
+        # Contar noches trabajadas
+        nights_worked = 0
+        for d_idx, s in enumerate(sch):
+            is_working = s == 'T' or s.startswith('T*')
+            if is_working and is_in_night_period(d_idx, year, night_periods):
+                nights_worked += 1
+        
+        ws2.append([name, p['Turno'], p['Rol'], v_credits, t_cover, total_work, nights_worked, v_natural])
 
+    # --- HOJA 3: RESUMEN ---
     ws3 = wb.create_sheet("Resumen Solicitudes")
     ws3.append(["Nombre", "Turno", "Rol", "Periodos Solicitados", "Días Relleno (Automático)"])
     for _, p in roster_df.iterrows():
@@ -350,6 +394,29 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 
         ws3.append([name, p['Turno'], p['Rol'], req_str, fill_str])
 
+    # --- HOJA 4: AJUSTES DE VACACIONES ---
+    ws4 = wb.create_sheet("Ajustes de Vacaciones")
+    ws4.column_dimensions['A'].width = 15
+    ws4.column_dimensions['B'].width = 25
+    ws4.column_dimensions['C'].width = 25
+    ws4.column_dimensions['D'].width = 25
+    ws4.append(["Fecha", "Trabajador (Cubre)", "Cubre a (Ausente)", "Puesto Ausente"])
+    
+    # Ordenar log cronológicamente
+    adjustments_log.sort(key=lambda x: x[0])
+    
+    for day_idx, coverer, missing in adjustments_log:
+        date_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=day_idx)
+        
+        # Buscar info del ausente
+        missing_p = roster_df[roster_df['Nombre'] == missing]
+        if not missing_p.empty:
+            missing_role = missing_p.iloc[0]['ID_Puesto'] # Ej: Jefe A
+        else:
+            missing_role = "Desconocido"
+            
+        ws4.append([date_obj.strftime("%d/%m/%Y"), coverer, missing, missing_role])
+
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
@@ -359,9 +426,9 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V4.2")
+st.set_page_config(layout="wide", page_title="Gestor V5.1")
 
-st.title("🚒 Gestor Integral V4.2")
+st.title("🚒 Gestor Integral V5.1")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -394,8 +461,8 @@ with c2:
             if dn_start and dn_end: st.session_state.nights.append((dn_start, dn_end))
         
         # Masiva (FIXED)
-        uploaded_n = st.file_uploader("Subir Excel", type=['xlsx'], key="n_up", label_visibility="collapsed")
-        if uploaded_n and st.button("Procesar"):
+        uploaded_n = st.file_uploader("Subir Excel Nocturnas", type=['xlsx'], key="n_up", label_visibility="collapsed")
+        if uploaded_n and st.button("Procesar Nocturnas"):
             try:
                 df_n = pd.read_excel(uploaded_n)
                 added = 0
@@ -559,7 +626,7 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
     if not st.session_state.requests:
         st.error("Faltan solicitudes.")
     else:
-        final_sch, errs, counters, fill_log = validate_and_generate(
+        final_sch, errs, counters, fill_log, adjustments_log = validate_and_generate(
             edited_df, st.session_state.requests, year_val, st.session_state.nights
         )
         if errs:
@@ -568,6 +635,6 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
         else:
             st.success("✅ Éxito")
             excel_data = create_excel(
-                final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights
+                final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V4.2_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V5.1_{year_val}.xlsx")
