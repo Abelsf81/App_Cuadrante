@@ -129,6 +129,10 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
     person_coverage_counters = {name: 0 for name in roster_df['Nombre']}
     
+    # NUEVO V5.6: Mapa de Calor de Errores para visualización
+    # {(Nombre, dia_idx): "Tipo de Error"}
+    error_heatmap = {}
+    
     name_to_turn = {row['Nombre']: row['Turno'] for _, row in roster_df.iterrows()}
     
     for _, row in roster_df.iterrows():
@@ -155,23 +159,33 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         absent_people = day_vacations[d]
         if not absent_people: continue
         
+        # REGLA 1: MÁX 2 PERSONAS
         if len(absent_people) > 2:
             date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
             errors.append(f"{date_str}: Hay {len(absent_people)} personas de vacaciones (Máx 2).")
-            continue
+            # Marcar error visual
+            for p in absent_people: error_heatmap[(p, d)] = "ERR: >2 Pers"
+            continue # Stop processing this day
             
+        # REGLAS DE COMPATIBILIDAD
         if len(absent_people) == 2:
             p1 = roster_df[roster_df['Nombre'] == absent_people[0]].iloc[0]
             p2 = roster_df[roster_df['Nombre'] == absent_people[1]].iloc[0]
+            
+            # Mismo turno
             if p1['Turno'] == p2['Turno']:
                 errors.append(f"Día {d+1}: {p1['Nombre']} y {p2['Nombre']} son del mismo turno.")
+                error_heatmap[(p1['Nombre'], d)] = "ERR: Turno"
+                error_heatmap[(p2['Nombre'], d)] = "ERR: Turno"
 
+        # COBERTURA
         for name_missing in absent_people:
             person_row = roster_df[roster_df['Nombre'] == name_missing].iloc[0]
             candidates = get_candidates(person_row, roster_df, d, final_schedule)
             
             if not candidates:
                 errors.append(f"Día {d+1}: Sin cobertura para {name_missing}.")
+                error_heatmap[(name_missing, d)] = "ERR: No Cobertura"
                 continue
                 
             valid_candidates = []
@@ -190,6 +204,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
             if not valid_candidates:
                 date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
                 errors.append(f"{date_str}: {name_missing} no tiene cobertura válida (Regla Máx 2T).")
+                error_heatmap[(name_missing, d)] = "ERR: Max 2T"
                 continue
             
             def sort_key(cand_name):
@@ -210,78 +225,125 @@ def validate_and_generate(roster_df, requests, year, night_periods):
             turn_coverage_counters[chosen_turn] += 1
             person_coverage_counters[chosen] += 1
 
-    fill_log = {} 
-    for name in roster_df['Nombre']:
-        current_v_days = [i for i, x in enumerate(final_schedule[name]) if x.startswith('V')]
-        needed = 39 - len(current_v_days)
-        added_dates = []
-        if needed > 0:
-            available_idx = [i for i, x in enumerate(final_schedule[name]) if x == 'L']
-            if len(available_idx) >= needed:
-                fill_idxs = get_clustered_dates(available_idx, needed)
-                for idx in fill_idxs:
-                    final_schedule[name][idx] = 'V(R)'
-                    d_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=idx)
-                    added_dates.append(d_obj)
-        fill_log[name] = added_dates
+    # Relleno (Solo si no hay errores críticos, para no ensuciar el visualizador de fallos)
+    if not errors:
+        fill_log = {} 
+        for name in roster_df['Nombre']:
+            current_v_days = [i for i, x in enumerate(final_schedule[name]) if x.startswith('V')]
+            needed = 39 - len(current_v_days)
+            added_dates = []
+            if needed > 0:
+                available_idx = [i for i, x in enumerate(final_schedule[name]) if x == 'L']
+                if len(available_idx) >= needed:
+                    fill_idxs = get_clustered_dates(available_idx, needed)
+                    for idx in fill_idxs:
+                        final_schedule[name][idx] = 'V(R)'
+                        d_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=idx)
+                        added_dates.append(d_obj)
+            fill_log[name] = added_dates
+    else:
+        fill_log = {} # No calculamos relleno si fallamos
 
-    return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log
+    return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log, error_heatmap
 
 # -------------------------------------------------------------------
-# 3. INFORMES Y EXCEL
+# 3. GENERADOR VISUAL DE ERRORES (NUEVO V5.6)
 # -------------------------------------------------------------------
-def generate_error_report(df_original, errors_dict):
+def generate_visual_error_report(schedule, roster_df, year, night_periods, error_heatmap, text_errors):
+    """
+    Genera un cuadrante visual identico al final, pero marcando en ROJO los conflictos.
+    """
     wb = Workbook()
-    fill_red = PatternFill("solid", fgColor="FFC7CE")
-    font_red = Font(color="9C0006")
+    
+    # Estilos Visuales
+    s_T = PatternFill("solid", fgColor="C6EFCE") # Verde (Base)
+    s_V_Req = PatternFill("solid", fgColor="FFEB9C") # Amarillo (Lo que pidió el usuario)
+    s_ERR = PatternFill("solid", fgColor="FF0000") # Rojo Fuerte (El conflicto)
+    s_L = PatternFill("solid", fgColor="F2F2F2") # Gris
+    s_Night = PatternFill("solid", fgColor="A6A6A6") # Noche
+    
+    font_bold = Font(bold=True)
+    font_white = Font(color="FFFFFF", bold=True) # Para leer sobre rojo
+    align_c = Alignment(horizontal="center", vertical="center")
+    border_all = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+    # --- HOJA 1: MAPA DE CONFLICTOS ---
     ws1 = wb.active
-    ws1.title = "Datos con Errores"
-    headers = list(df_original.columns) + ["ERROR"]
-    ws1.append(headers)
-    for idx, row in df_original.iterrows():
-        row_data = row.tolist()
-        if idx in errors_dict:
-            row_data.append(errors_dict[idx])
-            ws1.append(row_data)
-            current_row = ws1.max_row
-            for col in range(1, len(row_data) + 1):
-                cell = ws1.cell(row=current_row, column=col)
-                cell.fill = fill_red
-                cell.font = font_red
-        else:
-            row_data.append("OK")
-            ws1.append(row_data)
-    ws2 = wb.create_sheet("Log")
-    ws2.append(["Fila", "Error"])
-    for idx, msg in errors_dict.items():
-        ws2.append([f"Fila {idx + 2}", msg])
+    ws1.title = "Mapa de Conflictos"
+    ws1.column_dimensions['A'].width = 15
+    for i in range(2, 34): ws1.column_dimensions[get_column_letter(i)].width = 4
+    
+    current_row = 1
+    for t in TEAMS:
+        ws1.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=32)
+        cell_title = ws1.cell(current_row, 1, f"TURNO {t} (Visualización de Errores)")
+        cell_title.font = Font(bold=True, size=14, color="FFFFFF")
+        cell_title.fill = PatternFill("solid", fgColor="B22222") # Rojo oscuro para alertar
+        cell_title.alignment = align_c
+        current_row += 2
+
+        team_members = roster_df[roster_df['Turno'] == t]
+        for _, p in team_members.iterrows():
+            name = p['Nombre']
+            ws1.cell(current_row, 1, name).font = font_bold
+            for d in range(1, 32):
+                c = ws1.cell(current_row, d+1, d); c.alignment=align_c; c.border=border_all
+            current_row += 1
+            
+            for m_idx, mes in enumerate(MESES):
+                month_num = m_idx + 1
+                ws1.cell(current_row, 1, mes).font = font_bold
+                days_in_month = calendar.monthrange(year, month_num)[1]
+                
+                for d in range(1, 32):
+                    cell = ws1.cell(current_row, d+1); cell.border=border_all; cell.alignment=align_c
+                    
+                    if d <= days_in_month:
+                        date_obj = datetime.date(year, month_num, d)
+                        d_idx = date_obj.timetuple().tm_yday - 1
+                        status = schedule[name][d_idx]
+                        
+                        val = ""
+                        fill = s_L
+                        
+                        # 1. Pintar la base
+                        if status == 'T': 
+                            val = "T"; fill = s_T
+                        elif 'V' in status: 
+                            val = "V"; fill = s_V_Req
+                        
+                        # 2. Pintar Nocturna
+                        if is_in_night_period(d_idx, year, night_periods):
+                            fill = s_Night
+                            
+                        # 3. SOBREESCRIBIR CON ERROR (Lo más importante)
+                        if (name, d_idx) in error_heatmap:
+                            fill = s_ERR
+                            val = error_heatmap[(name, d_idx)] # Mensaje corto tipo "ERR: Turno"
+                            cell.font = font_white
+                        
+                        cell.value = val
+                        cell.fill = fill
+                    else:
+                        cell.fill = PatternFill("solid", fgColor="808080")
+                current_row += 1
+            current_row += 2
+
+    # --- HOJA 2: LISTA DE ERRORES ---
+    ws2 = wb.create_sheet("Lista de Errores")
+    ws2.column_dimensions['A'].width = 80
+    ws2.append(["Descripción del Conflicto"])
+    for err in text_errors:
+        ws2.append([err])
+        ws2.cell(ws2.max_row, 1).font = Font(color="FF0000")
+
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
     return out
 
-def generate_conflict_report(errors_list):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Conflictos Lógicos"
-    
-    ws.append(["Conflicto Detectado"])
-    ws.column_dimensions['A'].width = 100
-    
-    fill_red = PatternFill("solid", fgColor="FFC7CE")
-    font_red = Font(color="9C0006")
-    
-    for err in errors_list:
-        ws.append([err])
-        ws.cell(row=ws.max_row, column=1).fill = fill_red
-        ws.cell(row=ws.max_row, column=1).font = font_red
-        
-    out = io.BytesIO()
-    wb.save(out)
-    out.seek(0)
-    return out
-
-def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
+def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
+    # (Esta es la función original de exportación limpia, se mantiene igual)
     wb = Workbook()
     s_T = PatternFill("solid", fgColor="C6EFCE") 
     s_V = PatternFill("solid", fgColor="FFEB9C") 
@@ -295,8 +357,7 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
     border_thin = Side(border_style="thin", color="000000")
     border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
-    ws1 = wb.active
-    ws1.title = "Cuadrante"
+    ws1 = wb.active; ws1.title = "Cuadrante"
     ws1.column_dimensions['A'].width = 15
     for i in range(2, 34): ws1.column_dimensions[get_column_letter(i)].width = 4
     current_row = 1
@@ -309,40 +370,25 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
         current_row += 2
         team_members = roster_df[roster_df['Turno'] == t]
         for _, p in team_members.iterrows():
-            name = p['Nombre']
-            role = p['Rol']
+            name = p['Nombre']; role = p['Rol']
             ws1.cell(current_row, 1, f"{name} ({role})").font = font_bold
             for d in range(1, 32):
-                c = ws1.cell(current_row, d+1, d)
-                c.alignment = align_c
-                c.font = font_bold
-                c.border = border_all
-                c.fill = PatternFill("solid", fgColor="E0E0E0")
+                c = ws1.cell(current_row, d+1, d); c.alignment = align_c; c.font = font_bold; c.border = border_all; c.fill = PatternFill("solid", fgColor="E0E0E0")
             current_row += 1
             for m_idx, mes in enumerate(MESES):
                 month_num = m_idx + 1
-                ws1.cell(current_row, 1, mes).font = font_bold
-                ws1.cell(current_row, 1).border = border_all
+                ws1.cell(current_row, 1, mes).font = font_bold; ws1.cell(current_row, 1).border = border_all
                 days_in_month = calendar.monthrange(year, month_num)[1]
                 for d in range(1, 32):
-                    cell = ws1.cell(current_row, d+1)
-                    cell.border = border_all
-                    cell.alignment = align_c
+                    cell = ws1.cell(current_row, d+1); cell.border = border_all; cell.alignment = align_c
                     if d <= days_in_month:
                         date_obj = datetime.date(year, month_num, d)
                         day_of_year = date_obj.timetuple().tm_yday - 1
                         status = schedule[name][day_of_year]
-                        val = ""
-                        fill = s_L 
-                        if status == 'T':
-                            val = "T"
-                            fill = s_T
-                        elif status == 'V':
-                            val = "V"
-                            fill = s_V
-                        elif status == 'V(L)' or status == 'V(R)':
-                            val = "v"
-                            fill = s_VR
+                        val = ""; fill = s_L 
+                        if status == 'T': val = "T"; fill = s_T
+                        elif status == 'V': val = "V"; fill = s_V
+                        elif status == 'V(L)' or status == 'V(R)': val = "v"; fill = s_VR
                         elif status.startswith('T*'):
                             covered_name = status.split('(')[1][:-1]
                             covered_p = roster_df[roster_df['Nombre'] == covered_name]
@@ -355,15 +401,10 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
                                 elif "Cond" in c_role: abbr = f"C{c_turn}"
                                 elif "Bombero" in c_role: abbr = c_role.split()[-1]
                                 else: abbr = f"?{c_turn}"
-                            val = abbr
-                            fill = s_Cov
-                            cell.font = font_red
-                        if is_in_night_period(day_of_year, year, night_periods):
-                            fill = s_Night
-                        cell.value = val
-                        cell.fill = fill
-                    else:
-                        cell.fill = PatternFill("solid", fgColor="808080")
+                            val = abbr; fill = s_Cov; cell.font = font_red
+                        if is_in_night_period(day_of_year, year, night_periods): fill = s_Night
+                        cell.value = val; cell.fill = fill
+                    else: cell.fill = PatternFill("solid", fgColor="808080")
                 current_row += 1
             current_row += 2 
 
@@ -383,8 +424,7 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
         nights_worked = 0
         for d_idx, s in enumerate(sch):
             is_working = s == 'T' or s.startswith('T*')
-            if is_working and is_in_night_period(d_idx, year, night_periods):
-                nights_worked += 1
+            if is_working and is_in_night_period(d_idx, year, night_periods): nights_worked += 1
         ws2.append([name, p['Turno'], p['Rol'], v_credits, t_cover, total_work, nights_worked, v_natural])
 
     ws3 = wb.create_sheet("Resumen Solicitudes")
@@ -424,10 +464,8 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
     for day_idx, coverer, missing in adjustments_log:
         date_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=day_idx)
         missing_p = roster_df[roster_df['Nombre'] == missing]
-        if not missing_p.empty:
-            missing_role = missing_p.iloc[0]['ID_Puesto']
-        else:
-            missing_role = "Desconocido"
+        if not missing_p.empty: missing_role = missing_p.iloc[0]['ID_Puesto']
+        else: missing_role = "Desconocido"
         ws4.append([date_obj.strftime("%d/%m/%Y"), coverer, missing, missing_role])
 
     out = io.BytesIO()
@@ -439,9 +477,9 @@ def create_excel(schedule, roster_df, year, requests, fill_log, counters, night_
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V5.5")
+st.set_page_config(layout="wide", page_title="Gestor V5.6")
 
-st.title("🚒 Gestor Integral V5.5")
+st.title("🚒 Gestor Integral V5.6")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -490,7 +528,7 @@ with c2:
                     except: pass 
                 st.success(f"Añadidos {added} periodos.")
                 st.rerun()
-            except Exception as e: st.error(f"Error leyendo Excel: {e}")
+            except Exception as e: st.error(f"Error: {e}")
 
         with st.container(height=200):
             if st.session_state.nights:
@@ -526,7 +564,6 @@ with col_main:
         
         uploaded_file = st.file_uploader("Sube Excel", type=['xlsx'])
         
-        # --- REPORTE DE ERRORES DE IMPORTACIÓN ---
         if 'error_report_data' not in st.session_state: st.session_state.error_report_data = None
 
         if uploaded_file and st.button("Procesar Archivo"):
@@ -635,8 +672,10 @@ with col_main:
                 st.rerun()
         else: st.warning("Selecciona fechas.")
 
+# --- LISTA LIMPIA ---
 with col_list:
-    st.subheader("Listado")
+    st.subheader("Listado Solicitudes")
+    
     if st.session_state.requests:
         indexed_requests = []
         for i, r in enumerate(st.session_state.requests):
@@ -662,25 +701,29 @@ with col_list:
         st.rerun()
 
 st.divider()
-# --- NOVEDAD V5.5: BOTÓN DE CONFLICTOS ---
+# --- BOTÓN INTELIGENTE V5.6 ---
 if st.button("🚀 Generar Excel Final", type="primary", use_container_width=True):
     if not st.session_state.requests:
         st.error("Faltan solicitudes.")
     else:
-        final_sch, errs, counters, fill_log, adjustments_log = validate_and_generate(
+        # EJECUTAR VALIDACIÓN Y GENERAR MAPA DE CALOR
+        final_sch, errs, counters, fill_log, adjustments_log, err_heatmap = validate_and_generate(
             edited_df, st.session_state.requests, year_val, st.session_state.nights
         )
+        
         if errs:
-            st.error("❌ El cuadrante no es válido por las siguientes reglas:")
+            st.error("❌ El cuadrante tiene conflictos. Descarga el Excel Visual para verlos en ROJO:")
             for e in errs: st.write(f"- {e}")
             
-            # Generar reporte de conflictos
-            conflict_report = generate_conflict_report(errs)
-            st.download_button("📥 Descargar Informe de Conflictos", conflict_report, "Conflictos_Cuadrante.xlsx")
+            # GENERAR EXCEL DE ERROR VISUAL
+            error_excel = generate_visual_error_report(
+                final_sch, edited_df, year_val, st.session_state.nights, err_heatmap, errs
+            )
+            st.download_button("📥 Descargar Mapa de Conflictos (Excel Rojo)", error_excel, "Conflictos_Visuales.xlsx")
             
         else:
-            st.success("✅ Éxito")
-            excel_data = create_excel(
+            st.success("✅ Cuadrante Válido.")
+            excel_data = create_final_excel(
                 final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log
             )
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V5.5_{year_val}.xlsx")
+            st.download_button("📥 Descargar Cuadrante Final", excel_data, f"Cuadrante_V5.6_{year_val}.xlsx")
