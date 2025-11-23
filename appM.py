@@ -13,29 +13,30 @@ from operator import itemgetter
 
 # --- CONSTANTES Y CONFIGURACIÓN ---
 TEAMS = ['A', 'B', 'C']
-ROLES = ["Mando", "Conductor", "Bombero"]
+# ACTUALIZADO: Separamos Jefe y Subjefe para dar flexibilidad según interpretación PDF
+ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# Plantilla por defecto
+# Plantilla por defecto (Roles actualizados)
 DEFAULT_ROSTER = [
-    {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Mando",      "SV": False},
-    {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Mando",      "SV": False},
-    {"ID_Puesto": "Cond A",       "Nombre": "Cond A",       "Turno": "A", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
+    {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Subjefe",    "SV": False},
+    {"ID_Puesto": "Cond A",       "Nombre": "Cond A",       "Turno": "A", "Rol": "Conductor",  "SV": True},
     {"ID_Puesto": "Bombero A1",   "Nombre": "Bombero A1",   "Turno": "A", "Rol": "Bombero",    "SV": True},
     {"ID_Puesto": "Bombero A2",   "Nombre": "Bombero A2",   "Turno": "A", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero A3",   "Nombre": "Bombero A3",   "Turno": "A", "Rol": "Bombero",    "SV": False},
     
-    {"ID_Puesto": "Jefe B",       "Nombre": "Jefe B",       "Turno": "B", "Rol": "Mando",      "SV": False},
-    {"ID_Puesto": "Subjefe B",    "Nombre": "Subjefe B",    "Turno": "B", "Rol": "Mando",      "SV": False},
-    {"ID_Puesto": "Cond B",       "Nombre": "Cond B",       "Turno": "B", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Jefe B",       "Nombre": "Jefe B",       "Turno": "B", "Rol": "Jefe",       "SV": False},
+    {"ID_Puesto": "Subjefe B",    "Nombre": "Subjefe B",    "Turno": "B", "Rol": "Subjefe",    "SV": False},
+    {"ID_Puesto": "Cond B",       "Nombre": "Cond B",       "Turno": "B", "Rol": "Conductor",  "SV": True},
     {"ID_Puesto": "Bombero B1",   "Nombre": "Bombero B1",   "Turno": "B", "Rol": "Bombero",    "SV": True},
     {"ID_Puesto": "Bombero B2",   "Nombre": "Bombero B2",   "Turno": "B", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero B3",   "Nombre": "Bombero B3",   "Turno": "B", "Rol": "Bombero",    "SV": False},
 
-    {"ID_Puesto": "Jefe C",       "Nombre": "Jefe C",       "Turno": "C", "Rol": "Mando",      "SV": False},
-    {"ID_Puesto": "Subjefe C",    "Nombre": "Subjefe C",    "Turno": "C", "Rol": "Mando",      "SV": False},
-    {"ID_Puesto": "Cond C",       "Nombre": "Cond C",       "Turno": "C", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Jefe C",       "Nombre": "Jefe C",       "Turno": "C", "Rol": "Jefe",       "SV": False},
+    {"ID_Puesto": "Subjefe C",    "Nombre": "Subjefe C",    "Turno": "C", "Rol": "Subjefe",    "SV": False},
+    {"ID_Puesto": "Cond C",       "Nombre": "Cond C",       "Turno": "C", "Rol": "Conductor",  "SV": True},
     {"ID_Puesto": "Bombero C1",   "Nombre": "Bombero C1",   "Turno": "C", "Rol": "Bombero",    "SV": True},
     {"ID_Puesto": "Bombero C2",   "Nombre": "Bombero C2",   "Turno": "C", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero C3",   "Nombre": "Bombero C3",   "Turno": "C", "Rol": "Bombero",    "SV": False},
@@ -57,24 +58,49 @@ def generate_base_schedule(year):
             status[t] = (status[t] + 1) % 3
     return schedule, total_days
 
-def get_candidates(person_missing, roster_df, day_idx, current_schedule):
+def get_candidates(person_missing, roster_df, day_idx, current_schedule, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
     missing_turn = person_missing['Turno']
     
+    # REGLA PDF: "Dos trabajadores del mismo turno no podrán coincidir el mismo día realizando un Refuerzo"
+    blocked_turns_for_coverage = set()
+    if adjustments_log_current_day:
+        for coverer_name in adjustments_log_current_day:
+            cov_p = roster_df[roster_df['Nombre'] == coverer_name]
+            if not cov_p.empty:
+                blocked_turns_for_coverage.add(cov_p.iloc[0]['Turno'])
+
     for _, candidate in roster_df.iterrows():
+        # 1. Regla básica: Turno distinto y estar Libre
         if candidate['Turno'] == missing_turn: continue
         cand_status = current_schedule[candidate['Nombre']][day_idx]
         if cand_status != 'L': continue 
         
+        # 2. Regla PDF Cobertura Simultánea:
+        # Si ya hay alguien de este turno cubriendo hoy, este candidato NO puede cubrir
+        if candidate['Turno'] in blocked_turns_for_coverage: continue
+
+        # 3. Compatibilidad de Roles (PDF)
         is_compatible = False
-        if missing_role == "Mando":
-            if candidate['Rol'] == "Mando": is_compatible = True
+        cand_role = candidate['Rol']
+        
+        # Jefe se cubre con Jefe o Subjefe
+        if missing_role == "Jefe":
+            if cand_role in ["Jefe", "Subjefe"]: is_compatible = True
+            
+        # Subjefe se cubre con Subjefe o Jefe
+        elif missing_role == "Subjefe":
+             if cand_role in ["Jefe", "Subjefe"]: is_compatible = True
+             
+        # Conductor se cubre con Conductor o SV (Bombero con SV)
         elif missing_role == "Conductor":
-            if candidate['Rol'] == "Conductor": is_compatible = True
+            if cand_role == "Conductor": is_compatible = True
             if candidate['SV']: is_compatible = True
+            
+        # Bombero se cubre con Bombero o SV
         elif missing_role == "Bombero":
-            if candidate['Rol'] == "Bombero": is_compatible = True
+            if cand_role == "Bombero": is_compatible = True
             if candidate['SV']: is_compatible = True
             
         if is_compatible:
@@ -135,17 +161,15 @@ def validate_and_generate(roster_df, requests, year, night_periods):
 
     day_vacations = {i: [] for i in range(total_days)}
     daily_error_codes = {} 
-    
     natural_days_count = {name: 0 for name in roster_df['Nombre']}
 
+    # Pre-llenado de vacaciones
     for req in requests:
         name = req['Nombre']
         start_idx = req['Inicio'].timetuple().tm_yday - 1
         end_idx = req['Fin'].timetuple().tm_yday - 1
-        
         duration = (end_idx - start_idx) + 1
         natural_days_count[name] += duration
-        
         for d in range(start_idx, end_idx + 1):
             if final_schedule[name][d] == 'T':
                 day_vacations[d].append(name)
@@ -160,16 +184,19 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         if days > 39:
             errors.append(f"{name}: Exceso de días naturales ({days} > 39).")
 
+    # PROCESAMIENTO DÍA A DÍA
     for d in range(total_days):
         absent_people = day_vacations[d]
         if not absent_people: continue
         
+        # 1. Regla Global Max 2 (PDF: "Máximo de dos trabajadores...")
         if len(absent_people) > 2:
             date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
-            errors.append(f"{date_str}: Hay {len(absent_people)} personas de vacaciones (Máx 2).")
+            errors.append(f"{date_str}: Hay {len(absent_people)} personas de vacaciones (Máx 2 por PDF).")
             daily_error_codes[d] = "RED"
             continue
             
+        # 2. Regla Mismo Turno (PDF: "no pudiendo ser del mismo turno")
         if len(absent_people) == 2:
             p1 = roster_df[roster_df['Nombre'] == absent_people[0]].iloc[0]
             p2 = roster_df[roster_df['Nombre'] == absent_people[1]].iloc[0]
@@ -177,17 +204,27 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 errors.append(f"Día {d+1}: {p1['Nombre']} y {p2['Nombre']} son del mismo turno.")
                 daily_error_codes[d] = "YELLOW"
 
-        for name_missing in absent_people:
+        # COBERTURAS
+        current_day_coverers = [] # Para controlar regla de "mismo turno cubriendo"
+
+        # Ordenar ausentes para priorizar cubrir a Mandos primero
+        # (Aunque el orden de bucle es pequeño, ayuda)
+        absent_people_sorted = sorted(absent_people, key=lambda x: 0 if "Jefe" in x or "Subjefe" in x else 1)
+
+        for name_missing in absent_people_sorted:
             person_row = roster_df[roster_df['Nombre'] == name_missing].iloc[0]
-            candidates = get_candidates(person_row, roster_df, d, final_schedule)
+            
+            # Pasamos 'current_day_coverers' para filtrar candidatos que ya tengan alguien de su turno cubriendo
+            candidates = get_candidates(person_row, roster_df, d, final_schedule, current_day_coverers)
             
             if not candidates:
-                errors.append(f"Día {d+1}: Sin cobertura para {name_missing}.")
+                errors.append(f"Día {d+1}: Sin cobertura válida (Normas PDF) para {name_missing}.")
                 if d not in daily_error_codes: daily_error_codes[d] = "ORANGE"
                 continue
                 
             valid_candidates = []
             for cand in candidates:
+                # Regla 2T (PDF: "Máximo de 2 días de trabajo consecutivos")
                 prev_day = final_schedule[cand][d-1] if d > 0 else 'L'
                 prev_prev = final_schedule[cand][d-2] if d > 1 else 'L'
                 is_prev_work = prev_day.startswith('T')
@@ -197,7 +234,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
             
             if not valid_candidates:
                 date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
-                errors.append(f"{date_str}: {name_missing} no tiene cobertura válida (Regla Máx 2T).")
+                errors.append(f"{date_str}: {name_missing} sin cand. válido (Regla Max 2T o Cobertura Simultánea).")
                 if d not in daily_error_codes: daily_error_codes[d] = "ORANGE"
                 continue
             
@@ -205,11 +242,15 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 def sort_key(cand_name):
                     cand_turn = name_to_turn[cand_name]
                     return (turn_coverage_counters[cand_turn], person_coverage_counters[cand_name], random.random())
+                
                 valid_candidates.sort(key=sort_key)
                 chosen = valid_candidates[0]
                 chosen_turn = name_to_turn[chosen]
+                
                 final_schedule[chosen][d] = f"T*({name_missing})"
                 adjustments_log.append((d, chosen, name_missing))
+                current_day_coverers.append(chosen) # Registrar para bloquear su turno este día
+                
                 turn_coverage_counters[chosen_turn] += 1
                 person_coverage_counters[chosen] += 1
 
@@ -218,16 +259,18 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         for name in roster_df['Nombre']:
             current_nat = natural_days_count[name]
             needed = 39 - current_nat
-            added_dates = []
             if needed > 0:
                 available_idx = [i for i, x in enumerate(final_schedule[name]) if x == 'L']
                 if len(available_idx) >= needed:
                     fill_idxs = get_clustered_dates(available_idx, needed)
+                    added_dates = []
                     for idx in fill_idxs:
                         final_schedule[name][idx] = 'V(R)'
                         d_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=idx)
                         added_dates.append(d_obj)
-            fill_log[name] = added_dates
+                    fill_log[name] = added_dates
+                else:
+                     fill_log[name] = [] # No hay hueco
 
     return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log, daily_error_codes
 
@@ -255,11 +298,30 @@ def check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, n
         if d >= total_days: return "Fuera de rango"
         if base_schedule_turn[person['Turno']][d] == 'T':
             occupants = occupation_map[d]
+            
+            # 1. MAX 2 PERSONAS
             if len(occupants) >= 2: return "Max 2 Personas"
+            
+            # 2. CONFLICTO MISMO TURNO (Siempre prohibido)
             for occ in occupants:
                 if occ['Turno'] == person['Turno']: return f"Conflicto Turno con {occ['Nombre']}"
+            
+            # 3. CONFLICTO CATEGORÍA (REVISADO SEGÚN PDF)
+            # PDF: "ni de la misma categoría"
+            # INTERPRETACIÓN: Jefe y Subjefe son DISTINTAS categorías -> NO chocan
+            # Jefe vs Jefe -> Chocan
+            # Subjefe vs Subjefe -> Chocan
+            # Conductor vs Conductor -> Chocan
+            # Bombero vs Bombero -> NO Chocan (Excepción explícita PDF)
+            
             for occ in occupants:
-                if occ['Rol'] == person['Rol'] and person['Rol'] != "Bombero": return f"Conflicto Rol con {occ['Nombre']}"
+                if person['Rol'] == "Bombero" and occ['Rol'] == "Bombero":
+                    continue # Bomberos sí pueden coincidir
+                
+                # Si no son bomberos, misma categoría prohíbe coincidencia
+                if occ['Rol'] == person['Rol']: 
+                    return f"Conflicto Categoría ({person['Rol']}) con {occ['Nombre']}"
+                    
     return None
 
 def book_request(req, occupation_map, base_schedule_turn, roster_df):
@@ -302,39 +364,34 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                 adjusted_requests.append(r)
     return adjusted_requests
 
-# --- NUEVA FUNCIÓN V7.5 (ESTRATEGIA PIEDRAS GRANDES) ---
 def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     
-    # 1. Registrar solicitudes FIJAS (manuales o importadas)
+    # 1. Registrar ocupación actual
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
         
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
     
-    # --- ESTRATEGIA: Dividir en grupos por prioridad ---
-    # 1. Mandos (Solo se cubren entre ellos -> PRIORIDAD MAXIMA)
-    # 2. Conductores (Cobertura media)
-    # 3. Bomberos (Cobertura total -> Llenan los huecos que sobran)
-    
-    group_mandos = [p for p in people if p['Rol'] == 'Mando']
+    # ESTRATEGIA: "PIEDRAS GRANDES PRIMERO"
+    # Grupo 1: Jefes y Subjefes (Los más difíciles por restricciones de categoría)
+    group_mandos = [p for p in people if p['Rol'] in ['Jefe', 'Subjefe']]
+    # Grupo 2: Conductores
     group_conductores = [p for p in people if p['Rol'] == 'Conductor']
+    # Grupo 3: Bomberos (Más flexibles)
     group_bomberos = [p for p in people if p['Rol'] == 'Bombero']
-    others = [p for p in people if p['Rol'] not in ['Mando', 'Conductor', 'Bombero']] # Por si acaso
+    others = [p for p in people if p['Rol'] not in ['Jefe', 'Subjefe', 'Conductor', 'Bombero']]
     
-    # Orden de ejecución secuencial
     priority_groups = [group_mandos, group_conductores, group_bomberos, others]
     
     all_days = [datetime.date(year, 1, 1) + datetime.timedelta(days=i) for i in range(total_days)]
     
     for group in priority_groups:
-        # Barajamos dentro del grupo para equidad entre pares
         random.shuffle(group)
         
         for p in group:
-            # Calcular estado actual
             credits_got = 0
             natural_days_got = 0
             person_reqs = [r for r in final_requests if r['Nombre'] == p['Nombre']]
@@ -349,19 +406,17 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
             
             if credits_got >= 13: continue
             
-            # --- FASE 1: INTENTO INTELIGENTE (Patrones) ---
+            # FASE 1: BÚSQUEDA ALEATORIA INTELIGENTE
             pattern = detect_vacation_pattern(person_reqs)
             attempts = 0
-            max_attempts = 1500
+            max_attempts = 2000 
             
             while credits_got < 13 and attempts < max_attempts:
                 duration = 1
                 credits_needed = 13 - credits_got
                 
-                if credits_needed <= 2 or attempts > 500:
-                    duration = 1 
-                elif attempts > 200:
-                    duration = 4
+                if credits_needed <= 2 or attempts > 500: duration = 1 
+                elif attempts > 200: duration = 4
                 else:
                     if pattern == 'block_large': duration = random.randint(7, 13)
                     elif pattern == 'block_medium': duration = random.randint(4, 7)
@@ -375,9 +430,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                 day = random.choice(all_days)
                 d_idx = day.timetuple().tm_yday - 1
                 is_start_T = (base_schedule_turn[p['Turno']][d_idx] == 'T')
-                
-                if not is_start_T and duration == 1:
-                    attempts += 1; continue
+                if not is_start_T and duration == 1: attempts += 1; continue
 
                 req = {"Nombre": p['Nombre'], "Inicio": day, "Fin": day + datetime.timedelta(days=duration-1)}
                 
@@ -390,7 +443,6 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                     if not overlap:
                         book_request(req, occupation_map, base_schedule_turn, roster_df)
                         final_requests.append(req)
-                        
                         natural_days_got += duration
                         s = req['Inicio'].timetuple().tm_yday - 1
                         e = req['Fin'].timetuple().tm_yday - 1
@@ -399,15 +451,14 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                             if base_schedule_turn[p['Turno']][d] == 'T': added_credits += 1
                         credits_got += added_credits
                 attempts += 1
-                
-            # --- FASE 2: LA BARREDORA (Seguridad) ---
+            
+            # FASE 2: BARREDORA ESTRICTA (Día a Día)
             if credits_got < 13:
                 for d_idx in range(total_days):
                     if credits_got >= 13: break 
                     if natural_days_got >= 39: break 
 
                     if base_schedule_turn[p['Turno']][d_idx] != 'T': continue
-
                     day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d_idx)
                     req_one_day = {"Nombre": p['Nombre'], "Inicio": day_obj, "Fin": day_obj}
 
