@@ -13,7 +13,7 @@ from operator import itemgetter
 
 # --- CONSTANTES Y CONFIGURACIÓN ---
 TEAMS = ['A', 'B', 'C']
-# ACTUALIZADO: Separamos Jefe y Subjefe para dar flexibilidad según interpretación PDF
+# Separamos Jefe y Subjefe para dar flexibilidad según interpretación PDF
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -208,7 +208,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         current_day_coverers = [] # Para controlar regla de "mismo turno cubriendo"
 
         # Ordenar ausentes para priorizar cubrir a Mandos primero
-        # (Aunque el orden de bucle es pequeño, ayuda)
         absent_people_sorted = sorted(absent_people, key=lambda x: 0 if "Jefe" in x or "Subjefe" in x else 1)
 
         for name_missing in absent_people_sorted:
@@ -307,18 +306,9 @@ def check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, n
                 if occ['Turno'] == person['Turno']: return f"Conflicto Turno con {occ['Nombre']}"
             
             # 3. CONFLICTO CATEGORÍA (REVISADO SEGÚN PDF)
-            # PDF: "ni de la misma categoría"
-            # INTERPRETACIÓN: Jefe y Subjefe son DISTINTAS categorías -> NO chocan
-            # Jefe vs Jefe -> Chocan
-            # Subjefe vs Subjefe -> Chocan
-            # Conductor vs Conductor -> Chocan
-            # Bombero vs Bombero -> NO Chocan (Excepción explícita PDF)
-            
             for occ in occupants:
                 if person['Rol'] == "Bombero" and occ['Rol'] == "Bombero":
                     continue # Bomberos sí pueden coincidir
-                
-                # Si no son bomberos, misma categoría prohíbe coincidencia
                 if occ['Rol'] == person['Rol']: 
                     return f"Conflicto Categoría ({person['Rol']}) con {occ['Nombre']}"
                     
@@ -736,7 +726,11 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         name = p['Nombre']
         person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
         req_str = " | ".join(person_reqs) if person_reqs else "Sin solicitudes"
-        fill_dates = fill_log[name]; fill_str = "Ninguno"
+        
+        # --- CORRECCIÓN: Usamos .get() para evitar el error KeyError ---
+        fill_dates = fill_log.get(name, [])
+        fill_str = "Ninguno"
+        
         if fill_dates:
             date_ranges = []; fill_dates.sort(); range_start = fill_dates[0]; range_end = fill_dates[0]
             for i in range(1, len(fill_dates)):
