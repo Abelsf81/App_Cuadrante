@@ -232,7 +232,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log, daily_error_codes
 
 # -------------------------------------------------------------------
-# 4. MOTOR AUTO-SOLVER Y REPARADOR (V7.4 - RELLENO EN CASCADA)
+# 4. MOTOR AUTO-SOLVER Y REPARADOR
 # -------------------------------------------------------------------
 def detect_vacation_pattern(requests):
     if not requests: return 'scattered'
@@ -275,7 +275,8 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
     adjusted_requests = []
     person_map = {p['Nombre']: [] for p in people}
     for r in final_requests:
-        if r['Nombre'] in person_map: person_map[r['Nombre']].append(r)
+        if r['Nombre'] in person_map:
+            person_map[r['Nombre']].append(r)
             
     for name, reqs in person_map.items():
         total_credits = 0
@@ -291,7 +292,6 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                 allowed = 13 - total_credits
                 if allowed <= 0: continue
                 target_last_t = t_days_indices[allowed - 1]
-                # Fix año para recorte
                 year_req = r['Fin'].year
                 new_end_date = datetime.date(year_req, 1, 1) + datetime.timedelta(days=target_last_t)
                 r['Fin'] = new_end_date
@@ -312,10 +312,10 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
     random.shuffle(people) 
+    
     all_days = [datetime.date(year, 1, 1) + datetime.timedelta(days=i) for i in range(total_days)]
     
     for p in people:
-        # Calcular estado inicial
         credits_got = 0
         natural_days_got = 0
         person_reqs = [r for r in final_requests if r['Nombre'] == p['Nombre']]
@@ -330,43 +330,33 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
         
         if credits_got >= 13: continue
         
-        # Relleno en Cascada
+        pattern = detect_vacation_pattern(person_reqs)
         attempts = 0
         max_attempts = 1000
         
         while credits_got < 13 and attempts < max_attempts:
-            # Lógica de tamaño de bloque dinámica
-            # 1. Preferencia según patrón
-            # 2. Si falla mucho, reducir tamaño
-            # 3. Si faltan pocos créditos, modo francotirador
-            
-            pattern = detect_vacation_pattern(person_reqs)
-            remaining_credits = 13 - credits_got
-            
             duration = 1
+            credits_needed = 13 - credits_got
             
-            # Niveles de "Desesperación"
-            if remaining_credits <= 2 or attempts > 500:
-                duration = 1 # Francotirador
+            if credits_needed <= 2 or attempts > 500:
+                duration = 1 
             elif attempts > 200:
-                duration = 4 # Reducción
+                duration = 4
             else:
                 if pattern == 'block_large': duration = random.randint(7, 13)
                 elif pattern == 'block_medium': duration = random.randint(4, 7)
                 else: duration = 1
             
-            # Límite absoluto de naturales (39)
             if natural_days_got + duration > 39:
                 margin = 39 - natural_days_got
-                if margin <= 0: break # Ya no cabe nada
+                if margin <= 0: break 
                 duration = random.randint(1, margin)
 
             day = random.choice(all_days)
             d_idx = day.timetuple().tm_yday - 1
             is_start_T = (base_schedule_turn[p['Turno']][d_idx] == 'T')
             
-            # Eficiencia: Si busco 1 día, exijo que sea T
-            if duration == 1 and not is_start_T:
+            if not is_start_T and duration == 1:
                 attempts += 1; continue
 
             req = {"Nombre": p['Nombre'], "Inicio": day, "Fin": day + datetime.timedelta(days=duration-1)}
@@ -380,58 +370,71 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                 if not overlap:
                     book_request(req, occupation_map, base_schedule_turn, roster_df)
                     final_requests.append(req)
-                    
                     natural_days_got += duration
                     s = req['Inicio'].timetuple().tm_yday - 1
                     e = req['Fin'].timetuple().tm_yday - 1
                     added_credits = 0
                     for d in range(s, e+1):
                         if base_schedule_turn[p['Turno']][d] == 'T': added_credits += 1
-                    
                     credits_got += added_credits
-                    
-                    # Si añadimos un bloque pero no ganamos créditos (mala suerte), deshacer?
-                    # No, porque consume naturales. Pero con la cascada y prioridad T, se minimiza.
-            
             attempts += 1
 
     final_requests = force_balance_credits(final_requests, roster_df, base_schedule_turn)
     return final_requests
 
-# --- EXPORTADORES (MISMO QUE V7.3) ---
+# -------------------------------------------------------------------
+# 3. EXPORTADORES
+# -------------------------------------------------------------------
+
 def generate_proposal_report(proposal_data, valid_requests, roster_df):
-    wb = Workbook(); fill_orange = PatternFill("solid", fgColor="FFD966"); fill_green = PatternFill("solid", fgColor="C6EFCE"); font_bold = Font(bold=True)
-    ws1 = wb.active; ws1.title = "Comparativa de Ajustes"; headers = ["Nombre", "Inicio Original", "Fin Original", "Inicio Propuesto", "Fin Propuesto", "Estado", "Motivo"]; ws1.append(headers)
+    wb = Workbook()
+    fill_orange = PatternFill("solid", fgColor="FFD966")
+    fill_green = PatternFill("solid", fgColor="C6EFCE")
+    font_bold = Font(bold=True)
+    ws1 = wb.active; ws1.title = "Comparativa de Ajustes"
+    headers = ["Nombre", "Inicio Original", "Fin Original", "Inicio Propuesto", "Fin Propuesto", "Estado", "Motivo"]
+    ws1.append(headers)
     for col in range(1, 8): ws1.cell(1, col).font = font_bold
     for p in proposal_data:
         row = [p['Nombre'], p['Orig_Inicio'].strftime("%d/%m/%Y"), p['Orig_Fin'].strftime("%d/%m/%Y"), p['New_Inicio'].strftime("%d/%m/%Y"), p['New_Fin'].strftime("%d/%m/%Y"), p['Status'], p['Reason']]
-        ws1.append(row); curr = ws1.max_row
-        if p['Status'] == "Modificado": 
+        ws1.append(row)
+        curr = ws1.max_row
+        if p['Status'] == "Modificado":
             for c in range(1, 8): ws1.cell(curr, c).fill = fill_orange
-        elif p['Status'] == "Aceptado": 
+        elif p['Status'] == "Aceptado":
             for c in range(1, 8): ws1.cell(curr, c).fill = fill_green
     ws1.column_dimensions['A'].width = 20; ws1.column_dimensions['G'].width = 40
-    ws2 = wb.create_sheet("Datos Listos para Subir"); h_headers = ["ID_Puesto", "Nombre"]
+    ws2 = wb.create_sheet("Datos Listos para Subir")
+    h_headers = ["ID_Puesto", "Nombre"]
     for i in range(1, 21): h_headers.extend([f"Inicio {i}", f"Fin {i}"])
-    ws2.append(h_headers); sorted_reqs = sorted(valid_requests, key=lambda x: x['Nombre'])
+    ws2.append(h_headers)
+    sorted_reqs = sorted(valid_requests, key=lambda x: x['Nombre'])
     for _, person in roster_df.iterrows():
-        p_name = person['Nombre']; p_id = person['ID_Puesto']; p_reqs = [r for r in sorted_reqs if r['Nombre'] == p_name]; p_reqs.sort(key=lambda x: x['Inicio'])
+        p_name = person['Nombre']; p_id = person['ID_Puesto']
+        p_reqs = [r for r in sorted_reqs if r['Nombre'] == p_name]
+        p_reqs.sort(key=lambda x: x['Inicio'])
         row_data = [p_id, p_name]
         for r in p_reqs: row_data.append(r['Inicio']); row_data.append(r['Fin'])
         ws2.append(row_data)
-    out = io.BytesIO(); wb.save(out); out.seek(0); return out
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
 
 def generate_clean_import_excel(valid_requests, roster_df):
-    wb = Workbook(); ws2 = wb.active; ws2.title = "Datos Listos para Subir"
-    h_headers = ["ID_Puesto", "Nombre"]; 
+    wb = Workbook()
+    ws2 = wb.active; ws2.title = "Datos Listos para Subir"
+    h_headers = ["ID_Puesto", "Nombre"]
     for i in range(1, 21): h_headers.extend([f"Inicio {i}", f"Fin {i}"])
-    ws2.append(h_headers); sorted_reqs = sorted(valid_requests, key=lambda x: x['Nombre'])
+    ws2.append(h_headers)
+    sorted_reqs = sorted(valid_requests, key=lambda x: x['Nombre'])
     for _, person in roster_df.iterrows():
-        p_name = person['Nombre']; p_id = person['ID_Puesto']; p_reqs = [r for r in sorted_reqs if r['Nombre'] == p_name]; p_reqs.sort(key=lambda x: x['Inicio'])
+        p_name = person['Nombre']; p_id = person['ID_Puesto']
+        p_reqs = [r for r in sorted_reqs if r['Nombre'] == p_name]
+        p_reqs.sort(key=lambda x: x['Inicio'])
         row_data = [p_id, p_name]
         for r in p_reqs: row_data.append(r['Inicio']); row_data.append(r['Fin'])
         ws2.append(row_data)
-    out = io.BytesIO(); wb.save(out); out.seek(0); return out
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
 
 def smart_repair_requests(roster_df, imported_requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
@@ -439,28 +442,53 @@ def smart_repair_requests(roster_df, imported_requests, year, night_periods):
     proposal_data = []
     final_valid_requests = []
     imported_requests.sort(key=lambda x: x['Nombre'])
+
     for req in imported_requests:
         conflict = check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
+        
         if not conflict:
             book_request(req, occupation_map, base_schedule_turn, roster_df)
             final_valid_requests.append(req)
-            proposal_data.append({"Nombre": req['Nombre'], "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'], "New_Inicio": req['Inicio'], "New_Fin": req['Fin'], "Status": "Aceptado", "Reason": "OK"})
+            proposal_data.append({
+                "Nombre": req['Nombre'],
+                "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
+                "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
+                "Status": "Aceptado", "Reason": "OK"
+            })
         else:
             original_start = req['Inicio']; duration = (req['Fin'] - req['Inicio']).days + 1
-            found_fix = False; shifts = []
+            found_fix = False
+            shifts = []
             for i in range(1, 16): shifts.append(i); shifts.append(-i)
+            
             for delta in shifts:
-                new_start = original_start + datetime.timedelta(days=delta); new_end = new_start + datetime.timedelta(days=duration-1)
+                new_start = original_start + datetime.timedelta(days=delta)
+                new_end = new_start + datetime.timedelta(days=duration-1)
                 if new_start.year != year or new_end.year != year: continue
+                
                 new_req = {"Nombre": req['Nombre'], "Inicio": new_start, "Fin": new_end}
                 new_conflict = check_request_conflict(new_req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
+                
                 if not new_conflict:
                     book_request(new_req, occupation_map, base_schedule_turn, roster_df)
                     final_valid_requests.append(new_req)
-                    proposal_data.append({"Nombre": req['Nombre'], "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'], "New_Inicio": new_start, "New_Fin": new_end, "Status": "Modificado", "Reason": f"Conflicto original: {conflict}"})
-                    found_fix = True; break
+                    proposal_data.append({
+                        "Nombre": req['Nombre'],
+                        "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
+                        "New_Inicio": new_start, "New_Fin": new_end,
+                        "Status": "Modificado", "Reason": f"Conflicto original: {conflict}"
+                    })
+                    found_fix = True
+                    break
+            
             if not found_fix:
-                proposal_data.append({"Nombre": req['Nombre'], "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'], "New_Inicio": req['Inicio'], "New_Fin": req['Fin'], "Status": "Rechazado", "Reason": "Imposible encajar +/- 15 días"})
+                proposal_data.append({
+                    "Nombre": req['Nombre'],
+                    "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
+                    "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
+                    "Status": "Rechazado", "Reason": "Imposible encajar +/- 15 días"
+                })
+
     return final_valid_requests, proposal_data
 
 def generate_visual_error_report(schedule, roster_df, year, night_periods, error_heatmap, text_errors):
@@ -490,8 +518,10 @@ def generate_visual_error_report(schedule, roster_df, year, night_periods, error
                 for d in range(1, 32):
                     cell = ws1.cell(current_row, d+1); cell.border=border_all; cell.alignment=align_c
                     if d <= days_in_month:
-                        date_obj = datetime.date(year, month_num, d); d_idx = date_obj.timetuple().tm_yday - 1
-                        status = schedule[name][d_idx]; val = ""; fill = PatternFill("solid", fgColor="F2F2F2")
+                        date_obj = datetime.date(year, month_num, d)
+                        d_idx = date_obj.timetuple().tm_yday - 1
+                        status = schedule[name][d_idx]
+                        val = ""; fill = PatternFill("solid", fgColor="F2F2F2")
                         if status == 'T': val = "T"; fill = PatternFill("solid", fgColor="C6EFCE")
                         elif 'V' in status: val = "V"; fill = PatternFill("solid", fgColor="FFEB9C")
                         if is_in_night_period(d_idx, year, night_periods): fill = PatternFill("solid", fgColor="A6A6A6")
@@ -513,12 +543,16 @@ def generate_visual_error_report(schedule, roster_df, year, night_periods, error
 def generate_error_report(df_original, errors_dict):
     wb = Workbook()
     fill_red = PatternFill("solid", fgColor="FFC7CE"); font_red = Font(color="9C0006")
-    ws1 = wb.active; ws1.title = "Datos con Errores"; headers = list(df_original.columns) + ["ERROR"]; ws1.append(headers)
+    ws1 = wb.active; ws1.title = "Datos con Errores"
+    headers = list(df_original.columns) + ["ERROR"]
+    ws1.append(headers)
     for idx, row in df_original.iterrows():
         row_data = row.tolist()
         if idx in errors_dict:
-            row_data.append(errors_dict[idx]); ws1.append(row_data); current_row = ws1.max_row
-            for col in range(1, len(row_data) + 1): cell = ws1.cell(row=current_row, column=col); cell.fill = fill_red; cell.font = font_red
+            row_data.append(errors_dict[idx])
+            ws1.append(row_data); current_row = ws1.max_row
+            for col in range(1, len(row_data) + 1):
+                cell = ws1.cell(row=current_row, column=col); cell.fill = fill_red; cell.font = font_red
         else: row_data.append("OK"); ws1.append(row_data)
     ws2 = wb.create_sheet("Log"); ws2.append(["Fila", "Error"])
     for idx, msg in errors_dict.items(): ws2.append([f"Fila {idx + 2}", msg])
@@ -532,7 +566,8 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
     font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
     align_c = Alignment(horizontal="center", vertical="center")
-    border_thin = Side(border_style="thin", color="000000"); border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
+    border_thin = Side(border_style="thin", color="000000")
+    border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
     ws1 = wb.active; ws1.title = "Cuadrante"
     ws1.column_dimensions['A'].width = 15
@@ -634,9 +669,9 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V7.4")
+st.set_page_config(layout="wide", page_title="Gestor V7.5")
 
-st.title("🚒 Gestor Integral V7.4")
+st.title("🚒 Gestor Integral V7.5")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -780,7 +815,8 @@ with col_main:
                 for idx, row in df_upload.iterrows():
                     target_name = None
                     if 'ID_Puesto' in row and not pd.isnull(row['ID_Puesto']):
-                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]; if not match.empty: target_name = match.iloc[0]['Nombre']
+                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
+                        if not match.empty: target_name = match.iloc[0]['Nombre']
                     if not target_name and 'Nombre' in row:
                         if row['Nombre'] in names_list: target_name = row['Nombre']
                     if not target_name:
@@ -865,4 +901,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             st.download_button("📥 Descargar Mapa de Conflictos (Excel Rojo)", error_excel, "Conflictos_Visuales.xlsx")
         else:
             st.success("✅ Éxito"); excel_data = create_final_excel(final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log)
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.4_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.5_{year_val}.xlsx")
