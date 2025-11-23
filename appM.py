@@ -13,12 +13,12 @@ from operator import itemgetter
 
 # --- CONSTANTES Y CONFIGURACIÓN ---
 TEAMS = ['A', 'B', 'C']
-# ACTUALIZADO: Roles separados según PDF para permitir cruces legales
+# Roles separados para permitir flexibilidad PDF (Jefe y Subjefe son categorías distintas)
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# Plantilla por defecto (Roles actualizados para diferenciar categorías)
+# Plantilla por defecto
 DEFAULT_ROSTER = [
     {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Subjefe",    "SV": False},
@@ -43,7 +43,7 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. MOTOR LÓGICO
+# 1. MOTOR LÓGICO BASE
 # -------------------------------------------------------------------
 
 def generate_base_schedule(year):
@@ -63,7 +63,7 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, adjustm
     missing_role = person_missing['Rol']
     missing_turn = person_missing['Turno']
     
-    # REGLA PDF: "Dos trabajadores del mismo turno no podrán coincidir el mismo día realizando un Refuerzo"
+    # REGLA PDF: Dos trabajadores del mismo turno no pueden coincidir cubriendo el mismo día
     blocked_turns_for_coverage = set()
     if adjustments_log_current_day:
         for coverer_name in adjustments_log_current_day:
@@ -72,32 +72,22 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, adjustm
                 blocked_turns_for_coverage.add(cov_p.iloc[0]['Turno'])
 
     for _, candidate in roster_df.iterrows():
-        # 1. Regla básica: Turno distinto y estar Libre
         if candidate['Turno'] == missing_turn: continue
         cand_status = current_schedule[candidate['Nombre']][day_idx]
         if cand_status != 'L': continue 
         
-        # 2. Regla PDF Cobertura Simultánea:
         if candidate['Turno'] in blocked_turns_for_coverage: continue
 
-        # 3. Compatibilidad de Roles (PDF)
         is_compatible = False
         cand_role = candidate['Rol']
         
-        # Jefe se cubre con Jefe o Subjefe (Turnos complementarios)
         if missing_role == "Jefe":
             if cand_role in ["Jefe", "Subjefe"]: is_compatible = True
-            
-        # Subjefe se cubre con Subjefe o Jefe
         elif missing_role == "Subjefe":
              if cand_role in ["Jefe", "Subjefe"]: is_compatible = True
-             
-        # Conductor se cubre con Conductor o SV
         elif missing_role == "Conductor":
             if cand_role == "Conductor": is_compatible = True
             if candidate['SV']: is_compatible = True
-            
-        # Bombero se cubre con Bombero o SV
         elif missing_role == "Bombero":
             if cand_role == "Bombero": is_compatible = True
             if candidate['SV']: is_compatible = True
@@ -148,6 +138,10 @@ def get_clustered_dates(available_idxs, needed_count):
         else: break
     return sorted(selected)
 
+# -------------------------------------------------------------------
+# 2. VALIDADOR PRINCIPAL (Generación del Cuadrante)
+# -------------------------------------------------------------------
+
 def validate_and_generate(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
     final_schedule = {} 
@@ -162,7 +156,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     daily_error_codes = {} 
     natural_days_count = {name: 0 for name in roster_df['Nombre']}
 
-    # Pre-llenado de vacaciones
     for req in requests:
         name = req['Nombre']
         start_idx = req['Inicio'].timetuple().tm_yday - 1
@@ -183,19 +176,16 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         if days > 39:
             errors.append(f"{name}: Exceso de días naturales ({days} > 39).")
 
-    # PROCESAMIENTO DÍA A DÍA
     for d in range(total_days):
         absent_people = day_vacations[d]
         if not absent_people: continue
         
-        # 1. Regla Global Max 2
         if len(absent_people) > 2:
             date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
-            errors.append(f"{date_str}: Hay {len(absent_people)} personas de vacaciones (Máx 2 por PDF).")
+            errors.append(f"{date_str}: Hay {len(absent_people)} personas de vacaciones (Máx 2).")
             daily_error_codes[d] = "RED"
             continue
             
-        # 2. Regla Mismo Turno
         if len(absent_people) == 2:
             p1 = roster_df[roster_df['Nombre'] == absent_people[0]].iloc[0]
             p2 = roster_df[roster_df['Nombre'] == absent_people[1]].iloc[0]
@@ -203,20 +193,16 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 errors.append(f"Día {d+1}: {p1['Nombre']} y {p2['Nombre']} son del mismo turno.")
                 daily_error_codes[d] = "YELLOW"
 
-        # COBERTURAS
-        current_day_coverers = [] # Para controlar regla de "mismo turno cubriendo"
-
-        # Ordenar ausentes para priorizar cubrir a Mandos primero
+        current_day_coverers = []
+        # Priorizar cubrir a los Mandos primero
         absent_people_sorted = sorted(absent_people, key=lambda x: 0 if "Jefe" in x or "Subjefe" in x else 1)
 
         for name_missing in absent_people_sorted:
             person_row = roster_df[roster_df['Nombre'] == name_missing].iloc[0]
-            
-            # Pasamos 'current_day_coverers' para filtrar candidatos que ya tengan alguien de su turno cubriendo
             candidates = get_candidates(person_row, roster_df, d, final_schedule, current_day_coverers)
             
             if not candidates:
-                errors.append(f"Día {d+1}: Sin cobertura válida (Normas PDF) para {name_missing}.")
+                errors.append(f"Día {d+1}: Sin cobertura válida para {name_missing}.")
                 if d not in daily_error_codes: daily_error_codes[d] = "ORANGE"
                 continue
                 
@@ -231,7 +217,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
             
             if not valid_candidates:
                 date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
-                errors.append(f"{date_str}: {name_missing} sin cand. válido (Regla Max 2T o Cobertura Simultánea).")
+                errors.append(f"{date_str}: {name_missing} sin cand. válido (Regla 2T/Cobertura).")
                 if d not in daily_error_codes: daily_error_codes[d] = "ORANGE"
                 continue
             
@@ -246,7 +232,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 
                 final_schedule[chosen][d] = f"T*({name_missing})"
                 adjustments_log.append((d, chosen, name_missing))
-                current_day_coverers.append(chosen) # Registrar para bloquear su turno este día
+                current_day_coverers.append(chosen)
                 
                 turn_coverage_counters[chosen_turn] += 1
                 person_coverage_counters[chosen] += 1
@@ -267,13 +253,14 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                         added_dates.append(d_obj)
                     fill_log[name] = added_dates
                 else:
-                     fill_log[name] = [] # No hay hueco
+                     fill_log[name] = []
 
     return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log, daily_error_codes
 
 # -------------------------------------------------------------------
-# 4. MOTOR AUTO-SOLVER Y REPARADOR
+# 3. CEREBRO IA: REPARADOR Y RELLENADOR
 # -------------------------------------------------------------------
+
 def detect_vacation_pattern(requests):
     if not requests: return 'scattered'
     durations = []
@@ -303,18 +290,15 @@ def check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, n
             for occ in occupants:
                 if occ['Turno'] == person['Turno']: return f"Conflicto Turno con {occ['Nombre']}"
             
-            # 3. CONFLICTO CATEGORÍA (REVISADO SEGÚN PDF)
-            # PDF: "ni de la misma categoría"
-            # INTERPRETACIÓN: Jefe y Subjefe son DISTINTAS categorías -> NO chocan
-            # Jefe vs Jefe -> Chocan
-            # Subjefe vs Subjefe -> Chocan
-            # Bombero vs Bombero -> NO Chocan (Excepción explícita PDF)
-            
+            # 3. CONFLICTO CATEGORÍA (PDF: Jefe vs Subjefe OK, Bombero vs Bombero OK)
             for occ in occupants:
-                if person['Rol'] == "Bombero" and occ['Rol'] == "Bombero":
-                    continue # Bomberos sí pueden coincidir
+                # Caso Bomberos
+                if person['Rol'] == "Bombero" and occ['Rol'] == "Bombero": continue
+                # Caso Jefe/Subjefe cruzados
+                if (person['Rol'] == "Jefe" and occ['Rol'] == "Subjefe") or \
+                   (person['Rol'] == "Subjefe" and occ['Rol'] == "Jefe"): continue
                 
-                # Si no son bomberos, misma categoría prohíbe coincidencia
+                # Si es misma categoría estricta (ej: Jefe vs Jefe), ERROR
                 if occ['Rol'] == person['Rol']: 
                     return f"Conflicto Categoría ({person['Rol']}) con {occ['Nombre']}"
                     
@@ -360,11 +344,71 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                 adjusted_requests.append(r)
     return adjusted_requests
 
+def smart_repair_requests(roster_df, imported_requests, year, night_periods):
+    """Intenta arreglar conflictos moviendo fechas +/- 15 días."""
+    base_schedule_turn, total_days = generate_base_schedule(year)
+    occupation_map = {i: [] for i in range(total_days)}
+    proposal_data = []
+    final_valid_requests = []
+    
+    # Ordenar para procesar (intenta mantener las originales primero)
+    imported_requests.sort(key=lambda x: x['Nombre'])
+
+    for req in imported_requests:
+        conflict = check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
+        
+        if not conflict:
+            book_request(req, occupation_map, base_schedule_turn, roster_df)
+            final_valid_requests.append(req)
+            proposal_data.append({
+                "Nombre": req['Nombre'],
+                "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
+                "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
+                "Status": "Aceptado", "Reason": "OK"
+            })
+        else:
+            # Conflicto detectado, intentar mover
+            original_start = req['Inicio']; duration = (req['Fin'] - req['Inicio']).days + 1
+            found_fix = False
+            shifts = []
+            for i in range(1, 16): shifts.append(i); shifts.append(-i)
+            
+            for delta in shifts:
+                new_start = original_start + datetime.timedelta(days=delta)
+                new_end = new_start + datetime.timedelta(days=duration-1)
+                if new_start.year != year or new_end.year != year: continue
+                
+                new_req = {"Nombre": req['Nombre'], "Inicio": new_start, "Fin": new_end}
+                new_conflict = check_request_conflict(new_req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
+                
+                if not new_conflict:
+                    book_request(new_req, occupation_map, base_schedule_turn, roster_df)
+                    final_valid_requests.append(new_req)
+                    proposal_data.append({
+                        "Nombre": req['Nombre'],
+                        "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
+                        "New_Inicio": new_start, "New_Fin": new_end,
+                        "Status": "Modificado", "Reason": f"Conflicto original: {conflict}"
+                    })
+                    found_fix = True
+                    break
+            
+            if not found_fix:
+                proposal_data.append({
+                    "Nombre": req['Nombre'],
+                    "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
+                    "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
+                    "Status": "Rechazado", "Reason": "Imposible encajar +/- 15 días"
+                })
+
+    return final_valid_requests, proposal_data
+
 def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
+    """Rellena hasta 13 días priorizando Jefes."""
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     
-    # 1. Registrar ocupación actual
+    # 1. Registrar ocupación actual (ya validada o reparada)
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
         
@@ -372,11 +416,8 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     people = roster_df.to_dict('records')
     
     # ESTRATEGIA: "PIEDRAS GRANDES PRIMERO"
-    # Grupo 1: Jefes y Subjefes (Los más difíciles por restricciones de categoría)
     group_mandos = [p for p in people if p['Rol'] in ['Jefe', 'Subjefe']]
-    # Grupo 2: Conductores
     group_conductores = [p for p in people if p['Rol'] == 'Conductor']
-    # Grupo 3: Bomberos (Más flexibles)
     group_bomberos = [p for p in people if p['Rol'] == 'Bombero']
     others = [p for p in people if p['Rol'] not in ['Jefe', 'Subjefe', 'Conductor', 'Bombero']]
     
@@ -386,7 +427,6 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     
     for group in priority_groups:
         random.shuffle(group)
-        
         for p in group:
             credits_got = 0
             natural_days_got = 0
@@ -402,7 +442,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
             
             if credits_got >= 13: continue
             
-            # FASE 1: BÚSQUEDA ALEATORIA INTELIGENTE (Patrones)
+            # FASE 1: BÚSQUEDA ALEATORIA
             pattern = detect_vacation_pattern(person_reqs)
             attempts = 0
             max_attempts = 2000 
@@ -410,7 +450,6 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
             while credits_got < 13 and attempts < max_attempts:
                 duration = 1
                 credits_needed = 13 - credits_got
-                
                 if credits_needed <= 2 or attempts > 500: duration = 1 
                 elif attempts > 200: duration = 4
                 else:
@@ -435,7 +474,6 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                     for r in final_requests:
                         if r['Nombre'] == p['Nombre']:
                             if not (req['Inicio'] > r['Fin'] or req['Fin'] < r['Inicio']): overlap = True
-                    
                     if not overlap:
                         book_request(req, occupation_map, base_schedule_turn, roster_df)
                         final_requests.append(req)
@@ -448,14 +486,13 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                         credits_got += added_credits
                 attempts += 1
             
-            # FASE 2: BARREDORA ESTRICTA (Día a Día)
-            # IMPORTANTE: Para Jefes y Subjefes, esta fase garantiza que si hay hueco LEGAL, lo encuentran
+            # FASE 2: BARREDORA ESTRICTA
             if credits_got < 13:
                 for d_idx in range(total_days):
                     if credits_got >= 13: break 
                     if natural_days_got >= 39: break 
-
                     if base_schedule_turn[p['Turno']][d_idx] != 'T': continue
+
                     day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d_idx)
                     req_one_day = {"Nombre": p['Nombre'], "Inicio": day_obj, "Fin": day_obj}
 
@@ -466,7 +503,6 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                     for r in final_requests:
                         if r['Nombre'] == p['Nombre']:
                             if not (req_one_day['Inicio'] > r['Fin'] or req_one_day['Fin'] < r['Inicio']): overlap = True
-                    
                     if not overlap:
                         book_request(req_one_day, occupation_map, base_schedule_turn, roster_df)
                         final_requests.append(req_one_day)
@@ -477,7 +513,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     return final_requests
 
 # -------------------------------------------------------------------
-# 3. EXPORTADORES
+# 4. EXPORTADORES
 # -------------------------------------------------------------------
 
 def generate_proposal_report(proposal_data, valid_requests, roster_df):
@@ -529,61 +565,6 @@ def generate_clean_import_excel(valid_requests, roster_df):
         ws2.append(row_data)
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
-
-def smart_repair_requests(roster_df, imported_requests, year, night_periods):
-    base_schedule_turn, total_days = generate_base_schedule(year)
-    occupation_map = {i: [] for i in range(total_days)}
-    proposal_data = []
-    final_valid_requests = []
-    imported_requests.sort(key=lambda x: x['Nombre'])
-
-    for req in imported_requests:
-        conflict = check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
-        
-        if not conflict:
-            book_request(req, occupation_map, base_schedule_turn, roster_df)
-            final_valid_requests.append(req)
-            proposal_data.append({
-                "Nombre": req['Nombre'],
-                "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
-                "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
-                "Status": "Aceptado", "Reason": "OK"
-            })
-        else:
-            original_start = req['Inicio']; duration = (req['Fin'] - req['Inicio']).days + 1
-            found_fix = False
-            shifts = []
-            for i in range(1, 16): shifts.append(i); shifts.append(-i)
-            
-            for delta in shifts:
-                new_start = original_start + datetime.timedelta(days=delta)
-                new_end = new_start + datetime.timedelta(days=duration-1)
-                if new_start.year != year or new_end.year != year: continue
-                
-                new_req = {"Nombre": req['Nombre'], "Inicio": new_start, "Fin": new_end}
-                new_conflict = check_request_conflict(new_req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
-                
-                if not new_conflict:
-                    book_request(new_req, occupation_map, base_schedule_turn, roster_df)
-                    final_valid_requests.append(new_req)
-                    proposal_data.append({
-                        "Nombre": req['Nombre'],
-                        "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
-                        "New_Inicio": new_start, "New_Fin": new_end,
-                        "Status": "Modificado", "Reason": f"Conflicto original: {conflict}"
-                    })
-                    found_fix = True
-                    break
-            
-            if not found_fix:
-                proposal_data.append({
-                    "Nombre": req['Nombre'],
-                    "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
-                    "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
-                    "Status": "Rechazado", "Reason": "Imposible encajar +/- 15 días"
-                })
-
-    return final_valid_requests, proposal_data
 
 def generate_visual_error_report(schedule, roster_df, year, night_periods, error_heatmap, text_errors):
     wb = Workbook()
@@ -733,11 +714,8 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         name = p['Nombre']
         person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
         req_str = " | ".join(person_reqs) if person_reqs else "Sin solicitudes"
-        
-        # --- CORRECCIÓN AQUÍ: Usamos .get() para evitar KeyError ---
         fill_dates = fill_log.get(name, [])
         fill_str = "Ninguno"
-        
         if fill_dates:
             date_ranges = []; fill_dates.sort(); range_start = fill_dates[0]; range_end = fill_dates[0]
             for i in range(1, len(fill_dates)):
@@ -875,7 +853,10 @@ with col_main:
                                 except: pass
                 
                 with st.spinner("Detectando patrones y ajustando..."):
+                    # 1. PRIMERO: INTENTAR REPARAR CONFLICTOS CON EL NEGOCIADOR
                     fixed_reqs, proposal_data = smart_repair_requests(edited_df, imported_reqs, year_val, st.session_state.nights)
+                    
+                    # 2. SEGUNDO: RELLENAR HUECOS HASTA 13 CON EL SOLUCIONADOR DE PIEDRAS GRANDES
                     final_reqs = run_auto_solver_fill(edited_df, year_val, st.session_state.nights, fixed_reqs)
                 
                 st.session_state.pending_proposal = final_reqs
