@@ -13,7 +13,7 @@ from operator import itemgetter
 
 # --- CONSTANTES Y CONFIGURACIÓN ---
 TEAMS = ['A', 'B', 'C']
-# Roles separados para permitir flexibilidad PDF (Jefe y Subjefe son categorías distintas)
+# Roles separados según PDF
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
@@ -43,7 +43,7 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. MOTOR LÓGICO BASE
+# 1. MOTOR LÓGICO
 # -------------------------------------------------------------------
 
 def generate_base_schedule(year):
@@ -63,7 +63,6 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, adjustm
     missing_role = person_missing['Rol']
     missing_turn = person_missing['Turno']
     
-    # REGLA PDF: Dos trabajadores del mismo turno no pueden coincidir cubriendo el mismo día
     blocked_turns_for_coverage = set()
     if adjustments_log_current_day:
         for coverer_name in adjustments_log_current_day:
@@ -142,7 +141,7 @@ def get_clustered_dates(available_idxs, needed_count):
     return sorted(selected)
 
 # -------------------------------------------------------------------
-# 2. VALIDADOR PRINCIPAL (Generación del Cuadrante)
+# 2. VALIDADOR PRINCIPAL
 # -------------------------------------------------------------------
 
 def validate_and_generate(roster_df, requests, year, night_periods):
@@ -176,9 +175,9 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     adjustments_log = []
     
     for name, days in natural_days_count.items():
-        # Solo advertencia
+        # Advertencia solo si se pasa mucho (ej: > 45)
         if days > 45: 
-            errors.append(f"{name}: Exceso de días naturales ({days}).")
+            errors.append(f"{name}: Exceso excesivo de días naturales ({days}).")
 
     for d in range(total_days):
         absent_people = day_vacations[d]
@@ -198,6 +197,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 daily_error_codes[d] = "YELLOW"
 
         current_day_coverers = []
+        # Priorizar Jefes
         absent_people_sorted = sorted(absent_people, key=lambda x: 0 if "Jefe" in x or "Subjefe" in x else 1)
 
         for name_missing in absent_people_sorted:
@@ -242,12 +242,14 @@ def validate_and_generate(roster_df, requests, year, night_periods):
 
     fill_log = {} 
     if not errors:
-        pass 
+        for name in roster_df['Nombre']:
+            # El relleno real se hace antes en la IA
+            pass
 
     return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log, daily_error_codes
 
 # -------------------------------------------------------------------
-# 3. CEREBRO IA: REPARADOR Y RELLENADOR
+# 3. CEREBRO IA
 # -------------------------------------------------------------------
 
 def detect_vacation_pattern(requests):
@@ -267,18 +269,13 @@ def check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, n
     end_idx = req['Fin'].timetuple().tm_yday - 1
     person = roster_df[roster_df['Nombre'] == req['Nombre']].iloc[0]
     
-    # --- NUEVA LÓGICA NOCTURNA QUIRÚRGICA ---
-    # No importa si empieza o acaba en nocturna. Lo que importa es:
-    # ¿Hay algún día dentro del rango que sea CAMBIO DE TURNO y además sea día de TRABAJO?
-    # Si es así -> Prohibido porque no se puede cubrir.
+    # Lógica Nocturna Quirúrgica: Solo prohibido si trabajas en día de transición
     transition_dates = get_night_transition_dates(night_periods)
     
     for d in range(start_idx, end_idx + 1):
         if d >= total_days: return "Fuera de rango"
         
         day_obj = datetime.date(req['Inicio'].year, 1, 1) + datetime.timedelta(days=d)
-        
-        # Chequeo Nocturna
         if day_obj in transition_dates:
             if base_schedule_turn[person['Turno']][d] == 'T':
                 return f"Conflicto Nocturna (Refuerzo Prohibido el {day_obj.strftime('%d/%m')})"
@@ -286,14 +283,11 @@ def check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, n
         if base_schedule_turn[person['Turno']][d] == 'T':
             occupants = occupation_map[d]
             
-            # 1. MAX 2 PERSONAS
             if len(occupants) >= 2: return "Max 2 Personas"
             
-            # 2. CONFLICTO MISMO TURNO (Siempre prohibido)
             for occ in occupants:
                 if occ['Turno'] == person['Turno']: return f"Conflicto Turno con {occ['Nombre']}"
             
-            # 3. CONFLICTO CATEGORÍA (PDF: Jefe vs Subjefe OK, Bombero vs Bombero OK)
             for occ in occupants:
                 if person['Rol'] == "Bombero" and occ['Rol'] == "Bombero": continue
                 if (person['Rol'] == "Jefe" and occ['Rol'] == "Subjefe") or \
@@ -331,7 +325,6 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                 if base_schedule_turn[person['Turno']][d] == 'T': t_days_indices.append(d)
             cost = len(t_days_indices)
             
-            # CORRECCIÓN: Si con este bloque nos pasamos de 13, recortamos el final
             if total_credits + cost > 13:
                 allowed = 13 - total_credits
                 if allowed <= 0: continue
@@ -346,76 +339,17 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                 adjusted_requests.append(r)
     return adjusted_requests
 
-def smart_repair_requests(roster_df, imported_requests, year, night_periods):
-    """Intenta arreglar conflictos moviendo fechas +/- 15 días."""
-    base_schedule_turn, total_days = generate_base_schedule(year)
-    occupation_map = {i: [] for i in range(total_days)}
-    proposal_data = []
-    final_valid_requests = []
-    
-    imported_requests.sort(key=lambda x: x['Nombre'])
-
-    for req in imported_requests:
-        conflict = check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
-        
-        if not conflict:
-            book_request(req, occupation_map, base_schedule_turn, roster_df)
-            final_valid_requests.append(req)
-            proposal_data.append({
-                "Nombre": req['Nombre'],
-                "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
-                "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
-                "Status": "Aceptado", "Reason": "OK"
-            })
-        else:
-            original_start = req['Inicio']; duration = (req['Fin'] - req['Inicio']).days + 1
-            found_fix = False
-            shifts = []
-            for i in range(1, 16): shifts.append(i); shifts.append(-i)
-            
-            for delta in shifts:
-                new_start = original_start + datetime.timedelta(days=delta)
-                new_end = new_start + datetime.timedelta(days=duration-1)
-                if new_start.year != year or new_end.year != year: continue
-                
-                new_req = {"Nombre": req['Nombre'], "Inicio": new_start, "Fin": new_end}
-                new_conflict = check_request_conflict(new_req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days)
-                
-                if not new_conflict:
-                    book_request(new_req, occupation_map, base_schedule_turn, roster_df)
-                    final_valid_requests.append(new_req)
-                    proposal_data.append({
-                        "Nombre": req['Nombre'],
-                        "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
-                        "New_Inicio": new_start, "New_Fin": new_end,
-                        "Status": "Modificado", "Reason": f"Conflicto original: {conflict}"
-                    })
-                    found_fix = True
-                    break
-            
-            if not found_fix:
-                proposal_data.append({
-                    "Nombre": req['Nombre'],
-                    "Orig_Inicio": req['Inicio'], "Orig_Fin": req['Fin'],
-                    "New_Inicio": req['Inicio'], "New_Fin": req['Fin'],
-                    "Status": "Rechazado", "Reason": "Imposible encajar +/- 15 días"
-                })
-
-    return final_valid_requests, proposal_data
-
 def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     """Rellena hasta 13 días priorizando Jefes."""
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     
-    # 1. Registrar ocupación actual
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
         
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
     
-    # ESTRATEGIA: "PIEDRAS GRANDES PRIMERO"
     group_mandos = [p for p in people if p['Rol'] in ['Jefe', 'Subjefe']]
     group_conductores = [p for p in people if p['Rol'] == 'Conductor']
     group_bomberos = [p for p in people if p['Rol'] == 'Bombero']
@@ -442,7 +376,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
             
             if credits_got >= 13: continue
             
-            # FASE 1: BÚSQUEDA ALEATORIA
+            # FASE 1: ALEATORIA
             pattern = detect_vacation_pattern(person_reqs)
             attempts = 0
             max_attempts = 2000 
@@ -457,11 +391,9 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                     elif pattern == 'block_medium': duration = random.randint(4, 7)
                     else: duration = 1
                 
-                # --- CORRECCIÓN: No frenar por días naturales si faltan créditos ---
-                if natural_days_got + duration > 48: # Margen amplio
-                    margin = 48 - natural_days_got
-                    if margin <= 0: break 
-                    duration = random.randint(1, margin)
+                # NO FRENAR POR NATURAL DAYS SI FALTAN CRÉDITOS
+                if natural_days_got + duration > 50: 
+                    break 
 
                 day = random.choice(all_days)
                 d_idx = day.timetuple().tm_yday - 1
@@ -487,10 +419,14 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                         credits_got += added_credits
                 attempts += 1
             
-            # FASE 2: BARREDORA ESTRICTA (Día a Día)
+            # FASE 2: BARREDORA
             if credits_got < 13:
                 for d_idx in range(total_days):
                     if credits_got >= 13: break 
+                    
+                    # AQUÍ ESTABA EL PROBLEMA: ELIMINAMOS EL FRENO DE 39 DÍAS
+                    # if natural_days_got >= 39: break  <-- ELIMINADO
+                    
                     if base_schedule_turn[p['Turno']][d_idx] != 'T': continue
 
                     day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d_idx)
