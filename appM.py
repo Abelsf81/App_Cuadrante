@@ -233,7 +233,7 @@ def validate_and_generate(roster_df, requests, year, night_periods):
     return final_schedule, errors, person_coverage_counters, fill_log, adjustments_log, daily_error_codes
 
 # -------------------------------------------------------------------
-# 4. MOTOR AUTO-SOLVER (IA CAMALEÓN V7.0)
+# 4. MOTOR AUTO-SOLVER Y REPARADOR (V7.2 - LÍMITE Y RECORTE)
 # -------------------------------------------------------------------
 def detect_vacation_pattern(requests):
     if not requests: return 'scattered'
@@ -271,19 +271,80 @@ def book_request(req, occupation_map, base_schedule_turn, roster_df):
         if base_schedule_turn[person['Turno']][d] == 'T':
             occupation_map[d].append(person)
 
+# --- FUNCION NUEVA: BALANCEO FORZOSO ---
+def force_balance_credits(final_requests, roster_df, base_schedule_turn):
+    """
+    Recorta solicitudes si alguien se pasa de 13 créditos T.
+    """
+    people = roster_df.to_dict('records')
+    adjusted_requests = []
+    
+    # Agrupar por persona
+    person_map = {p['Nombre']: [] for p in people}
+    for r in final_requests:
+        if r['Nombre'] in person_map:
+            person_map[r['Nombre']].append(r)
+            
+    for name, reqs in person_map.items():
+        # Calcular creditos actuales
+        total_credits = 0
+        person = roster_df[roster_df['Nombre'] == name].iloc[0]
+        
+        # Procesar requests uno a uno
+        for r in reqs:
+            # Verificar cuanto gasta este request
+            s_idx = r['Inicio'].timetuple().tm_yday - 1
+            e_idx = r['Fin'].timetuple().tm_yday - 1
+            current_start = r['Inicio']
+            current_end = r['Fin']
+            
+            # Contar T en el rango
+            t_days_indices = []
+            for d in range(s_idx, e_idx + 1):
+                if base_schedule_turn[person['Turno']][d] == 'T':
+                    t_days_indices.append(d)
+            
+            cost = len(t_days_indices)
+            
+            # Si nos pasamos de 13, recortar
+            if total_credits + cost > 13:
+                allowed = 13 - total_credits
+                if allowed <= 0:
+                    continue # Eliminar request entero si ya estamos llenos
+                
+                # Recortar fecha fin para que solo coja 'allowed' dias T
+                # Tomamos el indice del T numero 'allowed'
+                target_last_t = t_days_indices[allowed - 1]
+                # La nueva fecha fin es ese día (o un poco mas si hay L despues, pero cortamos en el T para asegurar)
+                new_end_date = datetime.date(2026, 1, 1) + datetime.timedelta(days=target_last_t) # OJO AÑO
+                # Ajuste año dinámico (suponiendo que el año es el del request)
+                new_end_date = r['Fin'].replace(month=1, day=1) + datetime.timedelta(days=target_last_t)
+
+                r['Fin'] = new_end_date
+                total_credits += allowed
+                adjusted_requests.append(r)
+            else:
+                total_credits += cost
+                adjusted_requests.append(r)
+                
+    return adjusted_requests
+
 def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     
+    # 1. Pre-llenar con lo existente
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
         
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
     random.shuffle(people) 
+    
     all_days = [datetime.date(year, 1, 1) + datetime.timedelta(days=i) for i in range(total_days)]
     
     for p in people:
+        # Recalcular estado
         credits_got = 0
         natural_days_got = 0
         person_reqs = [r for r in final_requests if r['Nombre'] == p['Nombre']]
@@ -295,17 +356,27 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
             natural_days_got += dur
             for d in range(s_idx, e_idx + 1):
                 if base_schedule_turn[p['Turno']][d] == 'T': credits_got += 1
-                    
+        
+        # 2. Relleno Inteligente
         if credits_got >= 13: continue
         
         pattern = detect_vacation_pattern(person_reqs)
         attempts = 0
         
         while credits_got < 13 and attempts < 500:
+            # Determinar duración
             duration = 1
-            if pattern == 'block_large': duration = random.randint(7, 13)
-            elif pattern == 'block_medium': duration = random.randint(4, 7)
             
+            # MODO FRANCOTIRADOR: Si faltan pocos creditos (<=2), ignorar patrón y buscar hueco pequeño
+            credits_needed = 13 - credits_got
+            
+            if credits_needed <= 2:
+                duration = 1 # Force small block to fit
+            else:
+                if pattern == 'block_large': duration = random.randint(7, 13)
+                elif pattern == 'block_medium': duration = random.randint(4, 7)
+            
+            # Límite 39 Naturales
             if natural_days_got + duration > 39:
                 remaining_nat = 39 - natural_days_got
                 if remaining_nat <= 0: break
@@ -315,6 +386,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
             d_idx = day.timetuple().tm_yday - 1
             is_start_T = (base_schedule_turn[p['Turno']][d_idx] == 'T')
             
+            # Si buscamos eficiencia (pocos creditos faltan), exigimos empezar en T
             if not is_start_T and duration == 1:
                 attempts += 1; continue
 
@@ -336,10 +408,13 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                         if base_schedule_turn[p['Turno']][d] == 'T': credits_got += 1
             attempts += 1
             
+    # 3. BALANCEO FINAL (Corte de excesos)
+    final_requests = force_balance_credits(final_requests, roster_df, base_schedule_turn)
+            
     return final_requests
 
 # -------------------------------------------------------------------
-# 3. EXPORTADORES
+# 3. EXPORTADORES (Iguales a V6.5)
 # -------------------------------------------------------------------
 
 def generate_proposal_report(proposal_data, valid_requests, roster_df):
@@ -473,11 +548,33 @@ def generate_visual_error_report(schedule, roster_df, year, night_periods, error
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
+def generate_error_report(df_original, errors_dict):
+    wb = Workbook()
+    fill_red = PatternFill("solid", fgColor="FFC7CE"); font_red = Font(color="9C0006")
+    ws1 = wb.active; ws1.title = "Datos con Errores"
+    headers = list(df_original.columns) + ["ERROR"]
+    ws1.append(headers)
+    for idx, row in df_original.iterrows():
+        row_data = row.tolist()
+        if idx in errors_dict:
+            row_data.append(errors_dict[idx])
+            ws1.append(row_data); current_row = ws1.max_row
+            for col in range(1, len(row_data) + 1):
+                cell = ws1.cell(row=current_row, column=col); cell.fill = fill_red; cell.font = font_red
+        else: row_data.append("OK"); ws1.append(row_data)
+    ws2 = wb.create_sheet("Log"); ws2.append(["Fila", "Error"])
+    for idx, msg in errors_dict.items(): ws2.append([f"Fila {idx + 2}", msg])
+    out = io.BytesIO(); wb.save(out); out.seek(0)
+    return out
+
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
     wb = Workbook()
-    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFEB9C")
-    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE")
-    s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
+    s_T = PatternFill("solid", fgColor="C6EFCE") 
+    s_V = PatternFill("solid", fgColor="FFEB9C") 
+    s_VR = PatternFill("solid", fgColor="FFFFE0") 
+    s_Cov = PatternFill("solid", fgColor="FFC7CE") 
+    s_L = PatternFill("solid", fgColor="F2F2F2") 
+    s_Night = PatternFill("solid", fgColor="A6A6A6") 
     font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
     align_c = Alignment(horizontal="center", vertical="center")
     border_thin = Side(border_style="thin", color="000000")
@@ -583,9 +680,9 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V7.1")
+st.set_page_config(layout="wide", page_title="Gestor V7.2")
 
-st.title("🚒 Gestor Integral V7.1")
+st.title("🚒 Gestor Integral V7.2 (Matemático)")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -663,7 +760,7 @@ if 'proposal_data' not in st.session_state: st.session_state.proposal_data = Non
 if 'error_report_data' not in st.session_state: st.session_state.error_report_data = None
 
 with col_main:
-    # --- IA SOLVER V7.0 ---
+    # --- IA SOLVER V7.2 ---
     with st.expander("🤖 Auto-Solver & Negociador (IA)", expanded=True):
         st.info("Sube tus vacaciones. La IA arregla conflictos y rellena imitando tu estilo.")
         uploaded_solver = st.file_uploader("Sube Excel Vacaciones", type=['xlsx'], key="solver_up")
@@ -690,7 +787,7 @@ with col_main:
                                     imported_reqs.append({"Nombre": target_name, "Inicio": s, "Fin": e})
                                 except: pass
                 
-                with st.spinner("Detectando patrones y ajustando..."):
+                with st.spinner("Calculando..."):
                     fixed_reqs, proposal_data = smart_repair_requests(edited_df, imported_reqs, year_val, st.session_state.nights)
                     final_reqs = run_auto_solver_fill(edited_df, year_val, st.session_state.nights, fixed_reqs)
                 
@@ -716,8 +813,7 @@ with col_main:
 
     with st.expander("📂 Carga Masiva Horizontal"):
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
-        for i in range(1, 21): 
-            template_df[f'Inicio {i}'] = ""; template_df[f'Fin {i}'] = ""
+        for i in range(1, 21): template_df[f'Inicio {i}'] = ""; template_df[f'Fin {i}'] = ""
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer: template_df.to_excel(writer, index=False)
         st.download_button("⬇️ Descargar Plantilla", buffer.getvalue(), "plantilla_h.xlsx")
@@ -730,8 +826,7 @@ with col_main:
                 for idx, row in df_upload.iterrows():
                     target_name = None
                     if 'ID_Puesto' in row and not pd.isnull(row['ID_Puesto']):
-                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
-                        if not match.empty: target_name = match.iloc[0]['Nombre']
+                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]; if not match.empty: target_name = match.iloc[0]['Nombre']
                     if not target_name and 'Nombre' in row:
                         if row['Nombre'] in names_list: target_name = row['Nombre']
                     if not target_name:
@@ -816,4 +911,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             st.download_button("📥 Descargar Mapa de Conflictos (Excel Rojo)", error_excel, "Conflictos_Visuales.xlsx")
         else:
             st.success("✅ Éxito"); excel_data = create_final_excel(final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log)
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.1_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.2_{year_val}.xlsx")
