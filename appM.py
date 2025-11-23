@@ -13,12 +13,12 @@ from operator import itemgetter
 
 # --- CONSTANTES Y CONFIGURACIÓN ---
 TEAMS = ['A', 'B', 'C']
-# Separamos Jefe y Subjefe para dar flexibilidad según interpretación PDF
+# ACTUALIZADO: Roles separados según PDF para permitir cruces legales
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
          "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
-# Plantilla por defecto (Roles actualizados)
+# Plantilla por defecto (Roles actualizados para diferenciar categorías)
 DEFAULT_ROSTER = [
     {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Subjefe",    "SV": False},
@@ -78,14 +78,13 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, adjustm
         if cand_status != 'L': continue 
         
         # 2. Regla PDF Cobertura Simultánea:
-        # Si ya hay alguien de este turno cubriendo hoy, este candidato NO puede cubrir
         if candidate['Turno'] in blocked_turns_for_coverage: continue
 
         # 3. Compatibilidad de Roles (PDF)
         is_compatible = False
         cand_role = candidate['Rol']
         
-        # Jefe se cubre con Jefe o Subjefe
+        # Jefe se cubre con Jefe o Subjefe (Turnos complementarios)
         if missing_role == "Jefe":
             if cand_role in ["Jefe", "Subjefe"]: is_compatible = True
             
@@ -93,7 +92,7 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, adjustm
         elif missing_role == "Subjefe":
              if cand_role in ["Jefe", "Subjefe"]: is_compatible = True
              
-        # Conductor se cubre con Conductor o SV (Bombero con SV)
+        # Conductor se cubre con Conductor o SV
         elif missing_role == "Conductor":
             if cand_role == "Conductor": is_compatible = True
             if candidate['SV']: is_compatible = True
@@ -189,14 +188,14 @@ def validate_and_generate(roster_df, requests, year, night_periods):
         absent_people = day_vacations[d]
         if not absent_people: continue
         
-        # 1. Regla Global Max 2 (PDF: "Máximo de dos trabajadores...")
+        # 1. Regla Global Max 2
         if len(absent_people) > 2:
             date_str = (datetime.date(year, 1, 1) + datetime.timedelta(days=d)).strftime("%d-%m")
             errors.append(f"{date_str}: Hay {len(absent_people)} personas de vacaciones (Máx 2 por PDF).")
             daily_error_codes[d] = "RED"
             continue
             
-        # 2. Regla Mismo Turno (PDF: "no pudiendo ser del mismo turno")
+        # 2. Regla Mismo Turno
         if len(absent_people) == 2:
             p1 = roster_df[roster_df['Nombre'] == absent_people[0]].iloc[0]
             p2 = roster_df[roster_df['Nombre'] == absent_people[1]].iloc[0]
@@ -223,7 +222,6 @@ def validate_and_generate(roster_df, requests, year, night_periods):
                 
             valid_candidates = []
             for cand in candidates:
-                # Regla 2T (PDF: "Máximo de 2 días de trabajo consecutivos")
                 prev_day = final_schedule[cand][d-1] if d > 0 else 'L'
                 prev_prev = final_schedule[cand][d-2] if d > 1 else 'L'
                 is_prev_work = prev_day.startswith('T')
@@ -306,9 +304,17 @@ def check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, n
                 if occ['Turno'] == person['Turno']: return f"Conflicto Turno con {occ['Nombre']}"
             
             # 3. CONFLICTO CATEGORÍA (REVISADO SEGÚN PDF)
+            # PDF: "ni de la misma categoría"
+            # INTERPRETACIÓN: Jefe y Subjefe son DISTINTAS categorías -> NO chocan
+            # Jefe vs Jefe -> Chocan
+            # Subjefe vs Subjefe -> Chocan
+            # Bombero vs Bombero -> NO Chocan (Excepción explícita PDF)
+            
             for occ in occupants:
                 if person['Rol'] == "Bombero" and occ['Rol'] == "Bombero":
                     continue # Bomberos sí pueden coincidir
+                
+                # Si no son bomberos, misma categoría prohíbe coincidencia
                 if occ['Rol'] == person['Rol']: 
                     return f"Conflicto Categoría ({person['Rol']}) con {occ['Nombre']}"
                     
@@ -396,7 +402,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
             
             if credits_got >= 13: continue
             
-            # FASE 1: BÚSQUEDA ALEATORIA INTELIGENTE
+            # FASE 1: BÚSQUEDA ALEATORIA INTELIGENTE (Patrones)
             pattern = detect_vacation_pattern(person_reqs)
             attempts = 0
             max_attempts = 2000 
@@ -443,6 +449,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                 attempts += 1
             
             # FASE 2: BARREDORA ESTRICTA (Día a Día)
+            # IMPORTANTE: Para Jefes y Subjefes, esta fase garantiza que si hay hueco LEGAL, lo encuentran
             if credits_got < 13:
                 for d_idx in range(total_days):
                     if credits_got >= 13: break 
@@ -727,7 +734,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         person_reqs = [f"{r['Inicio'].strftime('%d/%m')} al {r['Fin'].strftime('%d/%m')}" for r in requests if r['Nombre'] == name]
         req_str = " | ".join(person_reqs) if person_reqs else "Sin solicitudes"
         
-        # --- CORRECCIÓN: Usamos .get() para evitar el error KeyError ---
+        # --- CORRECCIÓN AQUÍ: Usamos .get() para evitar KeyError ---
         fill_dates = fill_log.get(name, [])
         fill_str = "Ninguno"
         
