@@ -302,113 +302,128 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                 adjusted_requests.append(r)
     return adjusted_requests
 
-# --- NUEVA FUNCIÓN CORREGIDA (CON BARREDORA) ---
+# --- NUEVA FUNCIÓN V7.5 (ESTRATEGIA PIEDRAS GRANDES) ---
 def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     
-    # 1. Registrar ocupación actual
+    # 1. Registrar solicitudes FIJAS (manuales o importadas)
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
         
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
-    # PRIORIDAD: Mandos primero, luego el resto
-    people.sort(key=lambda x: (x['Rol'] != 'Mando', random.random())) 
+    
+    # --- ESTRATEGIA: Dividir en grupos por prioridad ---
+    # 1. Mandos (Solo se cubren entre ellos -> PRIORIDAD MAXIMA)
+    # 2. Conductores (Cobertura media)
+    # 3. Bomberos (Cobertura total -> Llenan los huecos que sobran)
+    
+    group_mandos = [p for p in people if p['Rol'] == 'Mando']
+    group_conductores = [p for p in people if p['Rol'] == 'Conductor']
+    group_bomberos = [p for p in people if p['Rol'] == 'Bombero']
+    others = [p for p in people if p['Rol'] not in ['Mando', 'Conductor', 'Bombero']] # Por si acaso
+    
+    # Orden de ejecución secuencial
+    priority_groups = [group_mandos, group_conductores, group_bomberos, others]
     
     all_days = [datetime.date(year, 1, 1) + datetime.timedelta(days=i) for i in range(total_days)]
     
-    for p in people:
-        # Calcular estado actual
-        credits_got = 0
-        natural_days_got = 0
-        person_reqs = [r for r in final_requests if r['Nombre'] == p['Nombre']]
+    for group in priority_groups:
+        # Barajamos dentro del grupo para equidad entre pares
+        random.shuffle(group)
         
-        for r in person_reqs:
-            s_idx = r['Inicio'].timetuple().tm_yday - 1
-            e_idx = r['Fin'].timetuple().tm_yday - 1
-            dur = (e_idx - s_idx) + 1
-            natural_days_got += dur
-            for d in range(s_idx, e_idx + 1):
-                if base_schedule_turn[p['Turno']][d] == 'T': credits_got += 1
-        
-        if credits_got >= 13: continue
-        
-        # --- FASE 1: INTENTO INTELIGENTE (Patrones) ---
-        pattern = detect_vacation_pattern(person_reqs)
-        attempts = 0
-        max_attempts = 2000 # Aumentado
-        
-        while credits_got < 13 and attempts < max_attempts:
-            duration = 1
-            credits_needed = 13 - credits_got
+        for p in group:
+            # Calcular estado actual
+            credits_got = 0
+            natural_days_got = 0
+            person_reqs = [r for r in final_requests if r['Nombre'] == p['Nombre']]
             
-            if credits_needed <= 2 or attempts > 500:
-                duration = 1 
-            elif attempts > 200:
-                duration = 4
-            else:
-                if pattern == 'block_large': duration = random.randint(7, 13)
-                elif pattern == 'block_medium': duration = random.randint(4, 7)
-                else: duration = 1
+            for r in person_reqs:
+                s_idx = r['Inicio'].timetuple().tm_yday - 1
+                e_idx = r['Fin'].timetuple().tm_yday - 1
+                dur = (e_idx - s_idx) + 1
+                natural_days_got += dur
+                for d in range(s_idx, e_idx + 1):
+                    if base_schedule_turn[p['Turno']][d] == 'T': credits_got += 1
             
-            if natural_days_got + duration > 39:
-                margin = 39 - natural_days_got
-                if margin <= 0: break 
-                duration = random.randint(1, margin)
-
-            day = random.choice(all_days)
-            d_idx = day.timetuple().tm_yday - 1
-            is_start_T = (base_schedule_turn[p['Turno']][d_idx] == 'T')
+            if credits_got >= 13: continue
             
-            if not is_start_T and duration == 1:
-                attempts += 1; continue
-
-            req = {"Nombre": p['Nombre'], "Inicio": day, "Fin": day + datetime.timedelta(days=duration-1)}
+            # --- FASE 1: INTENTO INTELIGENTE (Patrones) ---
+            pattern = detect_vacation_pattern(person_reqs)
+            attempts = 0
+            max_attempts = 1500
             
-            if not check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days):
-                overlap = False
-                for r in final_requests:
-                    if r['Nombre'] == p['Nombre']:
-                        if not (req['Inicio'] > r['Fin'] or req['Fin'] < r['Inicio']): overlap = True
+            while credits_got < 13 and attempts < max_attempts:
+                duration = 1
+                credits_needed = 13 - credits_got
                 
-                if not overlap:
-                    book_request(req, occupation_map, base_schedule_turn, roster_df)
-                    final_requests.append(req)
+                if credits_needed <= 2 or attempts > 500:
+                    duration = 1 
+                elif attempts > 200:
+                    duration = 4
+                else:
+                    if pattern == 'block_large': duration = random.randint(7, 13)
+                    elif pattern == 'block_medium': duration = random.randint(4, 7)
+                    else: duration = 1
+                
+                if natural_days_got + duration > 39:
+                    margin = 39 - natural_days_got
+                    if margin <= 0: break 
+                    duration = random.randint(1, margin)
+
+                day = random.choice(all_days)
+                d_idx = day.timetuple().tm_yday - 1
+                is_start_T = (base_schedule_turn[p['Turno']][d_idx] == 'T')
+                
+                if not is_start_T and duration == 1:
+                    attempts += 1; continue
+
+                req = {"Nombre": p['Nombre'], "Inicio": day, "Fin": day + datetime.timedelta(days=duration-1)}
+                
+                if not check_request_conflict(req, occupation_map, base_schedule_turn, roster_df, night_periods, total_days):
+                    overlap = False
+                    for r in final_requests:
+                        if r['Nombre'] == p['Nombre']:
+                            if not (req['Inicio'] > r['Fin'] or req['Fin'] < r['Inicio']): overlap = True
                     
-                    natural_days_got += duration
-                    s = req['Inicio'].timetuple().tm_yday - 1
-                    e = req['Fin'].timetuple().tm_yday - 1
-                    added_credits = 0
-                    for d in range(s, e+1):
-                        if base_schedule_turn[p['Turno']][d] == 'T': added_credits += 1
-                    credits_got += added_credits
-            attempts += 1
-            
-        # --- FASE 2: LA BARREDORA (Seguridad) ---
-        if credits_got < 13:
-            for d_idx in range(total_days):
-                if credits_got >= 13: break 
-                if natural_days_got >= 39: break 
-
-                if base_schedule_turn[p['Turno']][d_idx] != 'T': continue
-
-                day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d_idx)
-                req_one_day = {"Nombre": p['Nombre'], "Inicio": day_obj, "Fin": day_obj}
-
-                if check_request_conflict(req_one_day, occupation_map, base_schedule_turn, roster_df, night_periods, total_days):
-                    continue
+                    if not overlap:
+                        book_request(req, occupation_map, base_schedule_turn, roster_df)
+                        final_requests.append(req)
+                        
+                        natural_days_got += duration
+                        s = req['Inicio'].timetuple().tm_yday - 1
+                        e = req['Fin'].timetuple().tm_yday - 1
+                        added_credits = 0
+                        for d in range(s, e+1):
+                            if base_schedule_turn[p['Turno']][d] == 'T': added_credits += 1
+                        credits_got += added_credits
+                attempts += 1
                 
-                overlap = False
-                for r in final_requests:
-                    if r['Nombre'] == p['Nombre']:
-                        if not (req_one_day['Inicio'] > r['Fin'] or req_one_day['Fin'] < r['Inicio']): overlap = True
-                
-                if not overlap:
-                    book_request(req_one_day, occupation_map, base_schedule_turn, roster_df)
-                    final_requests.append(req_one_day)
-                    credits_got += 1
-                    natural_days_got += 1
+            # --- FASE 2: LA BARREDORA (Seguridad) ---
+            if credits_got < 13:
+                for d_idx in range(total_days):
+                    if credits_got >= 13: break 
+                    if natural_days_got >= 39: break 
+
+                    if base_schedule_turn[p['Turno']][d_idx] != 'T': continue
+
+                    day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d_idx)
+                    req_one_day = {"Nombre": p['Nombre'], "Inicio": day_obj, "Fin": day_obj}
+
+                    if check_request_conflict(req_one_day, occupation_map, base_schedule_turn, roster_df, night_periods, total_days):
+                        continue
+                    
+                    overlap = False
+                    for r in final_requests:
+                        if r['Nombre'] == p['Nombre']:
+                            if not (req_one_day['Inicio'] > r['Fin'] or req_one_day['Fin'] < r['Inicio']): overlap = True
+                    
+                    if not overlap:
+                        book_request(req_one_day, occupation_map, base_schedule_turn, roster_df)
+                        final_requests.append(req_one_day)
+                        credits_got += 1
+                        natural_days_got += 1
 
     final_requests = force_balance_credits(final_requests, roster_df, base_schedule_turn)
     return final_requests
