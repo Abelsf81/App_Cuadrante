@@ -295,8 +295,6 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
             # Verificar cuanto gasta este request
             s_idx = r['Inicio'].timetuple().tm_yday - 1
             e_idx = r['Fin'].timetuple().tm_yday - 1
-            current_start = r['Inicio']
-            current_end = r['Fin']
             
             # Contar T en el rango
             t_days_indices = []
@@ -313,11 +311,9 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                     continue # Eliminar request entero si ya estamos llenos
                 
                 # Recortar fecha fin para que solo coja 'allowed' dias T
-                # Tomamos el indice del T numero 'allowed'
                 target_last_t = t_days_indices[allowed - 1]
-                # La nueva fecha fin es ese día (o un poco mas si hay L despues, pero cortamos en el T para asegurar)
-                new_end_date = datetime.date(2026, 1, 1) + datetime.timedelta(days=target_last_t) # OJO AÑO
-                # Ajuste año dinámico (suponiendo que el año es el del request)
+                
+                # Ajuste año dinámico
                 new_end_date = r['Fin'].replace(month=1, day=1) + datetime.timedelta(days=target_last_t)
 
                 r['Fin'] = new_end_date
@@ -680,9 +676,9 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
 # INTERFAZ STREAMLIT
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V7.2")
+st.set_page_config(layout="wide", page_title="Gestor V7.3")
 
-st.title("🚒 Gestor Integral V7.2 (Matemático)")
+st.title("🚒 Gestor Integral V7.3")
 
 # 1. CONFIGURACIÓN
 c1, c2 = st.columns([2, 1])
@@ -760,7 +756,7 @@ if 'proposal_data' not in st.session_state: st.session_state.proposal_data = Non
 if 'error_report_data' not in st.session_state: st.session_state.error_report_data = None
 
 with col_main:
-    # --- IA SOLVER V7.2 ---
+    # --- IA SOLVER V7.3 ---
     with st.expander("🤖 Auto-Solver & Negociador (IA)", expanded=True):
         st.info("Sube tus vacaciones. La IA arregla conflictos y rellena imitando tu estilo.")
         uploaded_solver = st.file_uploader("Sube Excel Vacaciones", type=['xlsx'], key="solver_up")
@@ -787,7 +783,7 @@ with col_main:
                                     imported_reqs.append({"Nombre": target_name, "Inicio": s, "Fin": e})
                                 except: pass
                 
-                with st.spinner("Calculando..."):
+                with st.spinner("Detectando patrones y ajustando..."):
                     fixed_reqs, proposal_data = smart_repair_requests(edited_df, imported_reqs, year_val, st.session_state.nights)
                     final_reqs = run_auto_solver_fill(edited_df, year_val, st.session_state.nights, fixed_reqs)
                 
@@ -813,7 +809,8 @@ with col_main:
 
     with st.expander("📂 Carga Masiva Horizontal"):
         template_df = edited_df[['ID_Puesto', 'Nombre']].copy()
-        for i in range(1, 21): template_df[f'Inicio {i}'] = ""; template_df[f'Fin {i}'] = ""
+        for i in range(1, 21): 
+            template_df[f'Inicio {i}'] = ""; template_df[f'Fin {i}'] = ""
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer: template_df.to_excel(writer, index=False)
         st.download_button("⬇️ Descargar Plantilla", buffer.getvalue(), "plantilla_h.xlsx")
@@ -826,7 +823,8 @@ with col_main:
                 for idx, row in df_upload.iterrows():
                     target_name = None
                     if 'ID_Puesto' in row and not pd.isnull(row['ID_Puesto']):
-                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]; if not match.empty: target_name = match.iloc[0]['Nombre']
+                        match = edited_df[edited_df['ID_Puesto'] == row['ID_Puesto']]
+                        if not match.empty: target_name = match.iloc[0]['Nombre']
                     if not target_name and 'Nombre' in row:
                         if row['Nombre'] in names_list: target_name = row['Nombre']
                     if not target_name:
@@ -911,4 +909,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
             st.download_button("📥 Descargar Mapa de Conflictos (Excel Rojo)", error_excel, "Conflictos_Visuales.xlsx")
         else:
             st.success("✅ Éxito"); excel_data = create_final_excel(final_sch, edited_df, year_val, st.session_state.requests, fill_log, counters, st.session_state.nights, adjustments_log)
-            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.2_{year_val}.xlsx")
+            st.download_button("📥 Descargar", excel_data, f"Cuadrante_V7.3_{year_val}.xlsx")
