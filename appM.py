@@ -19,26 +19,26 @@ MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
 
 # Plantilla por defecto
 DEFAULT_ROSTER = [
-    {"ID_Puesto": "Jefe A",      "Nombre": "Jefe A",      "Turno": "A", "Rol": "Mando",     "SV": False},
-    {"ID_Puesto": "Subjefe A",   "Nombre": "Subjefe A",   "Turno": "A", "Rol": "Mando",     "SV": False},
-    {"ID_Puesto": "Cond A",      "Nombre": "Cond A",      "Turno": "A", "Rol": "Conductor", "SV": True},
-    {"ID_Puesto": "Bombero A1",  "Nombre": "Bombero A1",  "Turno": "A", "Rol": "Bombero",   "SV": True},
-    {"ID_Puesto": "Bombero A2",  "Nombre": "Bombero A2",  "Turno": "A", "Rol": "Bombero",   "SV": False},
-    {"ID_Puesto": "Bombero A3",  "Nombre": "Bombero A3",  "Turno": "A", "Rol": "Bombero",   "SV": False},
+    {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Mando",      "SV": False},
+    {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Mando",      "SV": False},
+    {"ID_Puesto": "Cond A",       "Nombre": "Cond A",       "Turno": "A", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Bombero A1",   "Nombre": "Bombero A1",   "Turno": "A", "Rol": "Bombero",    "SV": True},
+    {"ID_Puesto": "Bombero A2",   "Nombre": "Bombero A2",   "Turno": "A", "Rol": "Bombero",    "SV": False},
+    {"ID_Puesto": "Bombero A3",   "Nombre": "Bombero A3",   "Turno": "A", "Rol": "Bombero",    "SV": False},
     
-    {"ID_Puesto": "Jefe B",      "Nombre": "Jefe B",      "Turno": "B", "Rol": "Mando",     "SV": False},
-    {"ID_Puesto": "Subjefe B",   "Nombre": "Subjefe B",   "Turno": "B", "Rol": "Mando",     "SV": False},
-    {"ID_Puesto": "Cond B",      "Nombre": "Cond B",      "Turno": "B", "Rol": "Conductor", "SV": True},
-    {"ID_Puesto": "Bombero B1",  "Nombre": "Bombero B1",  "Turno": "B", "Rol": "Bombero",   "SV": True},
-    {"ID_Puesto": "Bombero B2",  "Nombre": "Bombero B2",  "Turno": "B", "Rol": "Bombero",   "SV": False},
-    {"ID_Puesto": "Bombero B3",  "Nombre": "Bombero B3",  "Turno": "B", "Rol": "Bombero",   "SV": False},
+    {"ID_Puesto": "Jefe B",       "Nombre": "Jefe B",       "Turno": "B", "Rol": "Mando",      "SV": False},
+    {"ID_Puesto": "Subjefe B",    "Nombre": "Subjefe B",    "Turno": "B", "Rol": "Mando",      "SV": False},
+    {"ID_Puesto": "Cond B",       "Nombre": "Cond B",       "Turno": "B", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Bombero B1",   "Nombre": "Bombero B1",   "Turno": "B", "Rol": "Bombero",    "SV": True},
+    {"ID_Puesto": "Bombero B2",   "Nombre": "Bombero B2",   "Turno": "B", "Rol": "Bombero",    "SV": False},
+    {"ID_Puesto": "Bombero B3",   "Nombre": "Bombero B3",   "Turno": "B", "Rol": "Bombero",    "SV": False},
 
-    {"ID_Puesto": "Jefe C",      "Nombre": "Jefe C",      "Turno": "C", "Rol": "Mando",     "SV": False},
-    {"ID_Puesto": "Subjefe C",   "Nombre": "Subjefe C",   "Turno": "C", "Rol": "Mando",     "SV": False},
-    {"ID_Puesto": "Cond C",      "Nombre": "Cond C",      "Turno": "C", "Rol": "Conductor", "SV": True},
-    {"ID_Puesto": "Bombero C1",  "Nombre": "Bombero C1",  "Turno": "C", "Rol": "Bombero",   "SV": True},
-    {"ID_Puesto": "Bombero C2",  "Nombre": "Bombero C2",  "Turno": "C", "Rol": "Bombero",   "SV": False},
-    {"ID_Puesto": "Bombero C3",  "Nombre": "Bombero C3",  "Turno": "C", "Rol": "Bombero",   "SV": False},
+    {"ID_Puesto": "Jefe C",       "Nombre": "Jefe C",       "Turno": "C", "Rol": "Mando",      "SV": False},
+    {"ID_Puesto": "Subjefe C",    "Nombre": "Subjefe C",    "Turno": "C", "Rol": "Mando",      "SV": False},
+    {"ID_Puesto": "Cond C",       "Nombre": "Cond C",       "Turno": "C", "Rol": "Conductor", "SV": True},
+    {"ID_Puesto": "Bombero C1",   "Nombre": "Bombero C1",   "Turno": "C", "Rol": "Bombero",    "SV": True},
+    {"ID_Puesto": "Bombero C2",   "Nombre": "Bombero C2",   "Turno": "C", "Rol": "Bombero",    "SV": False},
+    {"ID_Puesto": "Bombero C3",   "Nombre": "Bombero C3",   "Turno": "C", "Rol": "Bombero",    "SV": False},
 ]
 
 # -------------------------------------------------------------------
@@ -302,20 +302,24 @@ def force_balance_credits(final_requests, roster_df, base_schedule_turn):
                 adjusted_requests.append(r)
     return adjusted_requests
 
+# --- NUEVA FUNCIÓN CORREGIDA (CON BARREDORA) ---
 def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     
+    # 1. Registrar ocupación actual
     for req in existing_requests:
         book_request(req, occupation_map, base_schedule_turn, roster_df)
         
     final_requests = list(existing_requests)
     people = roster_df.to_dict('records')
-    random.shuffle(people) 
+    # PRIORIDAD: Mandos primero, luego el resto
+    people.sort(key=lambda x: (x['Rol'] != 'Mando', random.random())) 
     
     all_days = [datetime.date(year, 1, 1) + datetime.timedelta(days=i) for i in range(total_days)]
     
     for p in people:
+        # Calcular estado actual
         credits_got = 0
         natural_days_got = 0
         person_reqs = [r for r in final_requests if r['Nombre'] == p['Nombre']]
@@ -330,9 +334,10 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
         
         if credits_got >= 13: continue
         
+        # --- FASE 1: INTENTO INTELIGENTE (Patrones) ---
         pattern = detect_vacation_pattern(person_reqs)
         attempts = 0
-        max_attempts = 1000
+        max_attempts = 2000 # Aumentado
         
         while credits_got < 13 and attempts < max_attempts:
             duration = 1
@@ -370,6 +375,7 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                 if not overlap:
                     book_request(req, occupation_map, base_schedule_turn, roster_df)
                     final_requests.append(req)
+                    
                     natural_days_got += duration
                     s = req['Inicio'].timetuple().tm_yday - 1
                     e = req['Fin'].timetuple().tm_yday - 1
@@ -378,6 +384,31 @@ def run_auto_solver_fill(roster_df, year, night_periods, existing_requests):
                         if base_schedule_turn[p['Turno']][d] == 'T': added_credits += 1
                     credits_got += added_credits
             attempts += 1
+            
+        # --- FASE 2: LA BARREDORA (Seguridad) ---
+        if credits_got < 13:
+            for d_idx in range(total_days):
+                if credits_got >= 13: break 
+                if natural_days_got >= 39: break 
+
+                if base_schedule_turn[p['Turno']][d_idx] != 'T': continue
+
+                day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d_idx)
+                req_one_day = {"Nombre": p['Nombre'], "Inicio": day_obj, "Fin": day_obj}
+
+                if check_request_conflict(req_one_day, occupation_map, base_schedule_turn, roster_df, night_periods, total_days):
+                    continue
+                
+                overlap = False
+                for r in final_requests:
+                    if r['Nombre'] == p['Nombre']:
+                        if not (req_one_day['Inicio'] > r['Fin'] or req_one_day['Fin'] < r['Inicio']): overlap = True
+                
+                if not overlap:
+                    book_request(req_one_day, occupation_map, base_schedule_turn, roster_df)
+                    final_requests.append(req_one_day)
+                    credits_got += 1
+                    natural_days_got += 1
 
     final_requests = force_balance_credits(final_requests, roster_df, base_schedule_turn)
     return final_requests
@@ -765,7 +796,7 @@ with col_main:
                          if not m.empty: target_name = m.iloc[0]['Nombre']
                     if not target_name and 'Nombre' in row:
                          if row['Nombre'] in names_list: target_name = row['Nombre']
-                    
+                     
                     if target_name:
                         for i in range(1, 21):
                             col_s = f"Inicio {i}"; col_e = f"Fin {i}"
