@@ -42,7 +42,7 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. LÓGICA BASE
+# 1. LÓGICA BASE Y HERRAMIENTAS
 # -------------------------------------------------------------------
 
 def generate_base_schedule(year):
@@ -68,6 +68,21 @@ def get_night_transition_dates(night_periods):
     for start, end in night_periods:
         dates.add(end) 
     return dates
+
+def get_clustered_dates(available_idxs, needed_count):
+    """Agrupa días sueltos para rellenar vacaciones de forma ordenada."""
+    if not available_idxs: return []
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    groups.sort(key=len, reverse=True)
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else: break
+    return sorted(selected)
 
 def calculate_stats(roster_df, requests, year):
     base_sch, _ = generate_base_schedule(year)
@@ -395,12 +410,12 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V14.1 - ARQUITECTO CORREGIDO)
+# INTERFAZ STREAMLIT (V14.2 - MASTER)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V14.1 - Arquitecto")
+st.set_page_config(layout="wide", page_title="Gestor V14.2 - Arquitecto")
 
-st.title("🚒 Gestor V14.1: El Arquitecto")
+st.title("🚒 Gestor V14.2: El Arquitecto")
 st.caption("Sistema de Construcción de Cuadrantes desde Cero.")
 
 # 1. CONFIGURACIÓN INICIAL
@@ -447,7 +462,7 @@ with st.sidebar:
         with st.spinner("El Arquitecto está diseñando el año..."):
             new_reqs = run_architect_mode(edited_df, year_val, st.session_state.nights)
             st.session_state.raw_requests_df = pd.DataFrame(new_reqs)
-        st.success(f"¡Construido! {len(new_reqs)} periodos creados.")
+        st.success(f"¡Construido! {len(new_reqs)} periodos creados para cubrir 13 créditos por persona.")
         st.rerun()
 
 # 2. ESTADO DE SOLICITUDES
