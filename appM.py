@@ -104,6 +104,28 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, adjustm
             candidates.append(candidate['Nombre'])
     return candidates
 
+def calculate_stats(roster_df, requests, year):
+    """Calcula créditos T y días naturales para todos."""
+    base_sch, _ = generate_base_schedule(year)
+    stats = {}
+    for _, p in roster_df.iterrows():
+        stats[p['Nombre']] = {'credits': 0, 'natural': 0}
+        
+    for req in requests:
+        name = req['Nombre']
+        if name not in stats: continue
+        s_idx = req['Inicio'].timetuple().tm_yday - 1
+        e_idx = req['Fin'].timetuple().tm_yday - 1
+        row = roster_df[roster_df['Nombre'] == name].iloc[0]
+        
+        nat = (e_idx - s_idx) + 1
+        cred = 0
+        for d in range(s_idx, e_idx + 1):
+            if base_sch[row['Turno']][d] == 'T': cred += 1
+        stats[name]['credits'] += cred
+        stats[name]['natural'] += nat
+    return stats
+
 # -------------------------------------------------------------------
 # 2. VISUALIZADOR HTML
 # -------------------------------------------------------------------
@@ -188,27 +210,6 @@ def find_valid_slot(person_name, duration, roster_df, year, night_periods, curre
             return datetime.date(year, 1, 1) + datetime.timedelta(days=start_idx)
             
     return None
-
-def calculate_stats(roster_df, requests, year):
-    base_sch, _ = generate_base_schedule(year)
-    stats = {}
-    for _, p in roster_df.iterrows():
-        stats[p['Nombre']] = {'credits': 0, 'natural': 0}
-        
-    for req in requests:
-        name = req['Nombre']
-        if name not in stats: continue
-        s_idx = req['Inicio'].timetuple().tm_yday - 1
-        e_idx = req['Fin'].timetuple().tm_yday - 1
-        row = roster_df[roster_df['Nombre'] == name].iloc[0]
-        
-        nat = (e_idx - s_idx) + 1
-        cred = 0
-        for d in range(s_idx, e_idx + 1):
-            if base_sch[row['Turno']][d] == 'T': cred += 1
-        stats[name]['credits'] += cred
-        stats[name]['natural'] += nat
-    return stats
 
 # -------------------------------------------------------------------
 # 4. GENERACIÓN FINAL (EXCEL)
@@ -324,19 +325,18 @@ def create_final_excel(roster_df, requests, year, night_periods):
     ws4.append(["Fecha", "Cubre", "Ausente"])
     for d, c, a in adjustments_log:
         dt = datetime.date(year, 1, 1) + datetime.timedelta(days=d)
-        ws3 = wb.create_sheet("Log") if 'Log' not in wb.sheetnames else wb["Log"]
         ws4.append([dt.strftime("%d/%m/%Y"), c, a])
 
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V9.2 - INTERACTIVO + AUTO-EQUILIBRIO)
+# INTERFAZ STREAMLIT (V9.3 - INTERACTIVO + NOCTURNAS FIXED)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V9.2 - Interactivo")
+st.set_page_config(layout="wide", page_title="Gestor V9.3 - Interactivo")
 
-st.title("🚒 Gestor V9.2: Simulador Interactivo")
+st.title("🚒 Gestor V9.3: Simulador Interactivo")
 st.caption("Sube tus datos, visualiza conflictos y corrígelos en tiempo real.")
 
 # 1. CONFIGURACIÓN INICIAL
@@ -448,8 +448,8 @@ with c_editor:
             except: pass 
         current_requests = final_reqs_list
 
-# Stats
-stats = calculate_spent_credits(edited_df, current_requests, year_val)
+# Stats (CORREGIDO: usar calculate_stats)
+stats = calculate_stats(edited_df, current_requests, year_val)
 
 with c_stats:
     st.markdown("### 📊 Asesor Inteligente")
@@ -457,61 +457,47 @@ with c_stats:
     # --- BOTÓN MAESTRO: EQUILIBRADO GLOBAL ---
     if st.button("⚖️ Auto-Equilibrar Todo (Recortar >13 y Rellenar <13)", type="primary"):
         # 1. Fase de Recorte (>13)
-        cleaned_reqs = []
-        # Agrupar por nombre
         reqs_by_name = {}
         for r in current_requests:
             reqs_by_name.setdefault(r['Nombre'], []).append(r)
             
         temp_reqs = []
-        # Procesar recortes
         for name, reqs in reqs_by_name.items():
             cred = stats.get(name, {}).get('credits', 0)
-            # Ordenar cronológicamente
             reqs.sort(key=lambda x: x['Inicio'])
             
             while cred > 13 and reqs:
-                # Recortar del último
                 last_req = reqs[-1]
-                # Calcular cuantos creditos vale el ultimo dia
                 last_day = last_req['Fin']
-                # Check if last day is T
                 p_data = edited_df[edited_df['Nombre']==name].iloc[0]
                 d_idx = last_day.timetuple().tm_yday - 1
                 
-                if base_sch[p_data['Turno']][d_idx] == 'T':
-                    cred -= 1 # Hemos quitado un credito
+                if base_sch[p_data['Turno']][d_idx] == 'T': cred -= 1
                 
-                if last_req['Inicio'] == last_req['Fin']:
-                    reqs.pop() # Eliminar periodo completo
-                else:
-                    last_req['Fin'] = last_day - datetime.timedelta(days=1)
+                if last_req['Inicio'] == last_req['Fin']: reqs.pop()
+                else: last_req['Fin'] = last_day - datetime.timedelta(days=1)
             
             temp_reqs.extend(reqs)
             
-        # Actualizar lista intermedia
         current_requests = temp_reqs
-        # Recalcular stats tras recorte
-        stats = calculate_spent_credits(edited_df, current_requests, year_val)
+        stats = calculate_stats(edited_df, current_requests, year_val)
         
         # 2. Fase de Relleno (<13)
         added_count = 0
         for name, data in stats.items():
             credits_needed = 13 - data['credits']
             if credits_needed > 0:
-                # Buscar N días
                 for _ in range(credits_needed):
                     slot = find_valid_slot(name, 1, edited_df, year_val, st.session_state.nights, current_requests)
                     if slot:
                         current_requests.append({"Nombre": name, "Inicio": slot, "Fin": slot})
                         added_count += 1
         
-        # Guardar resultado final
         df_update = pd.DataFrame(current_requests)
         df_update['Inicio'] = pd.to_datetime(df_update['Inicio'])
         df_update['Fin'] = pd.to_datetime(df_update['Fin'])
         st.session_state.raw_requests_df = df_update
-        st.success(f"✅ Proceso completado. Se añadieron {added_count} días.")
+        st.success(f"✅ Completado. +{added_count} días añadidos.")
         st.rerun()
 
     st.divider()
@@ -531,7 +517,6 @@ with c_stats:
                     else: st.error("Sin hueco.")
             elif c > 13:
                 if st.button(f"✂️ Recortar 1 día ({name})", key=f"trim_{name}"):
-                    # Lógica manual de recorte (mismo que arriba pero individual)
                     df_t = pd.DataFrame(current_requests)
                     idx_list = df_t[df_t['Nombre']==name].index.tolist()
                     if idx_list:
@@ -542,8 +527,42 @@ with c_stats:
                         st.session_state.raw_requests_df = df_t
                         st.rerun()
 
+    # B. CONFLICTOS
+    st.divider()
+    st.markdown("##### ⚔️ Conflictos Detectados")
+    
+    occ_map = {i:[] for i in range(total_days)}
+    transition_dates = get_night_transition_dates(st.session_state.nights)
+    
+    for req in current_requests:
+        p = edited_df[edited_df['Nombre'] == req['Nombre']].iloc[0]
+        s = req['Inicio'].timetuple().tm_yday -1
+        e = req['Fin'].timetuple().tm_yday -1
+        for d in range(s, e+1):
+            if base_sch[p['Turno']][d] == 'T':
+                day_obj = datetime.date(year_val, 1, 1) + datetime.timedelta(days=d)
+                
+                # Conflicto 1: Nocturna
+                if day_obj in transition_dates:
+                    st.error(f"{p['Nombre']} trabaja en Cambio Turno ({day_obj.strftime('%d/%m')})")
+                
+                occ_map[d].append(p)
+
+    for d, occs in occ_map.items():
+        day_obj = datetime.date(year_val, 1, 1) + datetime.timedelta(days=d)
+        
+        if len(occs) > 2:
+            st.error(f"{day_obj.strftime('%d/%m')}: {len(occs)} personas (Máx 2)")
+        
+        if len(occs) == 2:
+            p1, p2 = occs[0], occs[1]
+            if p1['Turno'] == p2['Turno']:
+                st.warning(f"{day_obj.strftime('%d/%m')}: Mismo Turno ({p1['Nombre']} - {p2['Nombre']})")
+            if p1['Rol'] == p2['Rol'] and p1['Rol'] != 'Bombero':
+                st.warning(f"{day_obj.strftime('%d/%m')}: Misma Categoría ({p1['Rol']})")
+
 # 5. GENERACIÓN FINAL
 st.divider()
-if st.button("🚀 Generar Excel Final (Solo si todo está OK)", type="primary", use_container_width=True):
-    excel_io = create_final_excel(edited_df, current_requests, year_val, st.session_state.nights)
-    st.download_button("📥 Descargar Cuadrante Validado", excel_io, f"Cuadrante_Final_{year_val}.xlsx")
+if st.button("💾 Generar Excel Final"):
+    excel_bytes = create_final_excel(edited_df, current_requests, year_val, st.session_state.nights)
+    st.download_button("📥 Descargar Cuadrante", excel_bytes, f"Cuadrante_Final_{year_val}.xlsx")
