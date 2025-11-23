@@ -17,15 +17,15 @@ TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-# DEFINICIÓN DE ESTRATEGIAS
+# --- ESTRATEGIAS DE VACACIONES (EL MENÚ COMPLETO - 5 OPCIONES) ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (Recomendada)",
-        "desc": "3 periodos de 10 días + 1 de 9 días.",
+        "name": "🛡️ Estándar (4 Bloques)",
+        "desc": "10+10+10+9 días. Requiere iniciar uno en T para cuadrar.",
         "blocks": [
-            {"dur": 10, "cred": 4, "label": "Bloque A (10d - 4Cr)"},
-            {"dur": 10, "cred": 3, "label": "Bloque B (10d - 3Cr)"},
-            {"dur": 9,  "cred": 3, "label": "Bloque C (9d - 3Cr)"}
+            {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
+            {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Bloque 9d (3 Cr)"}
         ],
         "auto_recipe": [ 
             {"dur": 10, "target": 4}, 
@@ -34,12 +34,40 @@ STRATEGIES = {
             {"dur": 9, "target": 3}
         ]
     },
-    "long": {
-        "name": "✈️ Larga Estancia",
-        "desc": "2 periodos de 15 días + 1 de 9 días.",
+    "safe": {
+        "name": "🔢 Matemática Pura (4 Bloques)",
+        "desc": "12+12+9+6 días. Indestructible: Múltiplos de 3 siempre cuadran.",
         "blocks": [
-            {"dur": 15, "cred": 5, "label": "Gran Viaje (15d - 5Cr)"},
-            {"dur": 9,  "cred": 3, "label": "Escapada (9d - 3Cr)"}
+            {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
+            {"dur": 6,  "cred": 2, "label": "Corto 6d (2 Cr)"}
+        ],
+        "auto_recipe": [
+            {"dur": 12, "target": 4}, 
+            {"dur": 12, "target": 4}, 
+            {"dur": 9, "target": 3},
+            {"dur": 6, "target": 2}
+        ]
+    },
+    "balanced": {
+        "name": "⚖️ Tridente (3 Bloques)",
+        "desc": "13+13+13 días. Reparto equitativo del año.",
+        "blocks": [
+            {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
+            {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
+        ],
+        "auto_recipe": [
+            {"dur": 13, "target": 5}, 
+            {"dur": 13, "target": 4}, 
+            {"dur": 13, "target": 4}
+        ]
+    },
+    "long": {
+        "name": "✈️ Larga Estancia (3 Bloques)",
+        "desc": "15+15+9 días. Ideal para viajes largos.",
+        "blocks": [
+            {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
         ],
         "auto_recipe": [
             {"dur": 15, "target": 5}, 
@@ -48,11 +76,11 @@ STRATEGIES = {
         ]
     },
     "micro": {
-        "name": "🐜 Hormiga (Micro-Periodos)",
-        "desc": "5 periodos de 6 días + 1 de 9 días.",
+        "name": "🐜 Hormiga (6 Bloques)",
+        "desc": "5x6 días + 1x9 días. Muchos cortes pequeños.",
         "blocks": [
-            {"dur": 6, "cred": 2, "label": "Semana (6d - 2Cr)"},
-            {"dur": 9, "cred": 3, "label": "Semana+ (9d - 3Cr)"}
+            {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
+            {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
         ],
         "auto_recipe": [
             {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
@@ -111,7 +139,7 @@ def is_in_night_period(day_idx, year, night_periods):
 def get_night_transition_dates(night_periods):
     dates = set()
     for start, end in night_periods:
-        dates.add(end) 
+        dates.add(end) # Solo el final es crítico
     return dates
 
 def calculate_stats(roster_df, requests, year):
@@ -134,28 +162,34 @@ def calculate_stats(roster_df, requests, year):
     return stats
 
 # -------------------------------------------------------------------
-# 2. MOTOR INTELIGENTE
+# 2. MOTOR INTELIGENTE (VALIDADOR & GENERADOR)
 # -------------------------------------------------------------------
 
 def check_global_conflict_generic(start_idx, duration, person, occupation_map, base_sch, year, transition_dates):
+    """Verifica conflictos contra un mapa de ocupación dado."""
     total_days = len(base_sch['A'])
     if start_idx + duration > total_days: return True
 
     for i in range(start_idx, start_idx + duration):
+        # 1. Nocturna (Fin de periodo y trabajo)
         d_obj = datetime.date(year, 1, 1) + timedelta(days=i)
         if d_obj in transition_dates:
             if base_sch[person['Turno']][i] == 'T': return True
         
+        # 2. Ocupación
         occupants = occupation_map.get(i, [])
         if len(occupants) >= 2: return True
         
         for occ in occupants:
+            # 3. Mismo Turno
             if occ['Turno'] == person['Turno']: return True
+            # 4. Misma Categoría
             if person['Rol'] != 'Bombero' and occ['Rol'] == person['Rol']: return True
             
     return False
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
+    """Genera el MENÚ DE OPCIONES DINÁMICO según estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -229,14 +263,9 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
             duration = block['dur']
             target = block['target']
             
-            # Obtener opciones validas
             options = []
             for d in range(0, total_days - duration):
-                # Check rapido de creditos
-                c = 0
-                for k in range(d, d+duration):
-                    if base_sch[person['Turno']][k] == 'T': c += 1
-                
+                c = sum([1 for k in range(d, d+duration) if base_sch[person['Turno']][k] == 'T'])
                 if c == target:
                      if not check_global_conflict_generic(d, duration, person, occupation_map, base_sch, year, transition_dates):
                         options.append(d)
@@ -295,8 +324,22 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL (EXCEL) Y FUNCIONES AUX
+# 4. GENERACIÓN FINAL (EXCEL) Y AUXILIARES
 # -------------------------------------------------------------------
+def get_clustered_dates(available_idxs, needed_count):
+    if not available_idxs: return []
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    groups.sort(key=len, reverse=True)
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else: break
+    return sorted(selected)
+
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
@@ -333,20 +376,6 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
             
         if is_compatible: candidates.append(candidate['Nombre'])
     return candidates
-
-def get_clustered_dates(available_idxs, needed_count):
-    if not available_idxs: return []
-    groups = []
-    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
-        groups.append(list(map(itemgetter(1), g)))
-    groups.sort(key=len, reverse=True)
-    selected = []
-    for group in groups:
-        if len(selected) < needed_count:
-            take = min(len(group), needed_count - len(selected))
-            selected.extend(group[:take])
-        else: break
-    return sorted(selected)
 
 def validate_and_generate_final(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
@@ -401,6 +430,7 @@ def validate_and_generate_final(roster_df, requests, year, night_periods):
                     turn_coverage_counters[name_to_turn[chosen]] += 1
                     person_coverage_counters[chosen] += 1
 
+    # Relleno Administrativo (V(R))
     fill_log = {}
     for name in roster_df['Nombre']:
         current = natural_days_count.get(name, 0)
@@ -481,12 +511,13 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V17.1 - CORREGIDA)
+# INTERFAZ STREAMLIT (V18.0 - MULTI-ESTRATEGIA)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V17.1")
+st.set_page_config(layout="wide", page_title="Gestor V18.0")
 
-st.title("🚒 Gestor V17.1: El Estratega")
+st.title("🚒 Gestor V18.0: El Estratega")
+st.caption("Modo Copiloto: Elige estrategia y selecciona las mejores fechas.")
 
 # 1. CONFIGURACIÓN
 with st.sidebar:
@@ -520,7 +551,7 @@ with st.sidebar:
                             d2 = pd.to_datetime(v2).date()
                             st.session_state.nights.append((d1, d2)); c+=1
                     except: pass
-                if c>0: st.success(f"Añadidos {c} periodos.")
+                if c>0: st.success(f"Cargadas {c}")
             except: pass
         if st.button("Limpiar Nocturnas"): st.session_state.nights = []
 
@@ -590,7 +621,7 @@ with c_main:
                         st.warning("Sin opciones disponibles.")
                     else:
                         with st.container(height=200):
-                            # CORRECCIÓN DE CLAVE ÚNICA AQUÍ
+                            # CLAVE ÚNICA (FIXED)
                             for opt in available_opts[:20]: 
                                 if st.button(f"➕ {opt['label']}", key=f"add_{selected_person}_{opt['start']}_{i}"):
                                     current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
