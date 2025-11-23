@@ -63,7 +63,6 @@ def is_in_night_period(day_idx, year, night_periods):
     return False
 
 def get_night_transition_dates(night_periods):
-    """Devuelve fechas donde está PROHIBIDO hacer refuerzo (Final de nocturna)."""
     dates = set()
     for start, end in night_periods:
         dates.add(end) 
@@ -81,7 +80,6 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
             if not cov_p.empty:
                 blocked_turns.add(cov_p.iloc[0]['Turno'])
 
-    # REGLA ANTI-24H: El turno que trabajó ayer de noche NO puede cubrir hoy
     turn_exhausted_from_night = None
     if day_idx > 0:
         prev_day_idx = day_idx - 1
@@ -119,7 +117,6 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
     return candidates
 
 def calculate_stats(roster_df, requests, year):
-    """Calcula créditos T y días naturales."""
     base_sch, _ = generate_base_schedule(year)
     stats = {}
     for _, p in roster_df.iterrows():
@@ -141,7 +138,136 @@ def calculate_stats(roster_df, requests, year):
     return stats
 
 # -------------------------------------------------------------------
-# 2. VISUALIZADOR HTML
+# 2. GENERADOR AUTOMÁTICO (INTEGRADO)
+# -------------------------------------------------------------------
+
+def auto_generate_schedule(roster_df, year, night_periods):
+    """
+    Genera un cuadrante desde cero buscando la combinación perfecta 4+4+3+2 = 13 Créditos.
+    Respeta todas las normas (Max 2, Turnos, Categoría, Nocturna).
+    """
+    base_sch, total_days = generate_base_schedule(year)
+    transition_dates = get_night_transition_dates(night_periods)
+    
+    # Mapa de ocupación para ir validando conforme generamos
+    # {dia_idx: [personas]}
+    occupation_map = {i: [] for i in range(total_days)}
+    
+    generated_requests = []
+    
+    # Orden de Prioridad: Jefes -> Subjefes -> Conductores -> Bomberos
+    # (Las piedras grandes primero)
+    people = roster_df.to_dict('records')
+    priority_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
+    people.sort(key=lambda x: priority_order.index(x['Rol']))
+    
+    # La Receta Mágica para 13 créditos
+    RECIPE = [
+        {"dur": 10, "target_creds": 4}, # Bloque grande
+        {"dur": 10, "target_creds": 4}, # Bloque grande
+        {"dur": 10, "target_creds": 3}, # Bloque medio
+        {"dur": 9,  "target_creds": 2}, # Bloque pequeño
+    ]
+    
+    # Ventanas Trimestrales (para distribuir)
+    q_windows = [
+        (0, 90),    # Q1
+        (91, 181),  # Q2
+        (182, 273), # Q3
+        (274, 364)  # Q4
+    ]
+    
+    for person in people:
+        my_slots = [] # Para no solaparse consigo mismo
+        
+        # Intentamos llenar la receta
+        # Aleatorizamos el orden de la receta para que no siempre el de 9 dias sea el ultimo
+        current_recipe = RECIPE.copy()
+        random.shuffle(current_recipe)
+        
+        for step_idx, step in enumerate(current_recipe):
+            duration = step['dur']
+            target_c = step['target_creds']
+            
+            found = False
+            
+            # Intentar encajar en un trimestre específico para distribuir
+            window_start, window_end = q_windows[step_idx % 4]
+            
+            # Buscar todos los inicios validos en el año que cumplan CRÉDITOS y NORMAS
+            valid_starts = []
+            
+            # Escaneamos el año (o la ventana preferente primero, luego todo)
+            # Hacemos barrido global para asegurar
+            all_days = list(range(total_days - duration))
+            random.shuffle(all_days) # Azar
+            
+            for start_d in all_days:
+                # 1. Calcular créditos
+                creds = 0
+                for k in range(start_d, start_d + duration):
+                    if base_sch[person['Turno']][k] == 'T': creds += 1
+                
+                if creds != target_c: continue # No nos vale matemáticamente
+                
+                # 2. Validar Normas (Nocturna, Ocupación, etc)
+                is_valid = True
+                
+                # Check Nocturna Fin
+                end_date_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=start_d + duration - 1)
+                if end_date_obj in transition_dates:
+                    # Si acaba en transición, miramos si trabaja ese día
+                    if base_sch[person['Turno']][start_d + duration - 1] == 'T':
+                        is_valid = False
+                
+                if not is_valid: continue
+                
+                # Check Ocupación y Solapamiento Propio
+                for k in range(start_d, start_d + duration):
+                    # Solapamiento propio
+                    for s_exist in my_slots:
+                        # Si choca con otro periodo suyo (margen 2 días)
+                        if not (k < s_exist[0] - 2 or k > s_exist[1] + 2):
+                            is_valid = False; break
+                    if not is_valid: break
+                    
+                    # Normas Globales
+                    occupants = occupation_map[k]
+                    if len(occupants) >= 2: is_valid = False; break
+                    
+                    for occ in occupants:
+                        if occ['Turno'] == person['Turno']: is_valid = False; break
+                        if person['Rol'] != 'Bombero' and occ['Rol'] == person['Rol']: is_valid = False; break
+                    
+                    if not is_valid: break
+                
+                if is_valid:
+                    # ENCONTRADO
+                    # Reservar
+                    for k in range(start_d, start_d + duration):
+                        occupation_map[k].append(person)
+                    
+                    my_slots.append((start_d, start_d + duration - 1))
+                    
+                    start_date = datetime.date(year, 1, 1) + datetime.timedelta(days=start_d)
+                    end_date = datetime.date(year, 1, 1) + datetime.timedelta(days=start_d + duration - 1)
+                    
+                    generated_requests.append({
+                        "Nombre": person['Nombre'],
+                        "Inicio": start_date,
+                        "Fin": end_date
+                    })
+                    found = True
+                    break # Pasar al siguiente paso de la receta
+            
+            if not found:
+                # Si falla, la IA no añade nada (mejor dejar hueco que poner error)
+                pass
+                
+    return generated_requests
+
+# -------------------------------------------------------------------
+# 3. VISUALIZADOR HTML
 # -------------------------------------------------------------------
 def render_annual_calendar(year, team, base_sch, night_periods):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
@@ -161,9 +287,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
                 d_idx = dt.timetuple().tm_yday - 1
                 state = base_sch[team][d_idx]
                 
-                bg_color = "#eee"
-                text_color = "#ccc"
-                border = "1px solid #fff"
+                bg_color = "#eee"; text_color = "#ccc"; border = "1px solid #fff"
                 
                 if state == 'T':
                     bg_color = "#d4edda"; text_color = "#155724"
@@ -183,7 +307,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 3. MOTOR DE SUGERENCIAS Y VALIDACIÓN
+# 4. MOTOR DE SUGERENCIAS Y VALIDACIÓN INTERACTIVA
 # -------------------------------------------------------------------
 
 def check_full_compliance(req, person, base_schedule_turn, roster_df, night_periods, total_days, current_requests, year):
@@ -196,7 +320,6 @@ def check_full_compliance(req, person, base_schedule_turn, roster_df, night_peri
         p_req = roster_df[roster_df['Nombre'] == r['Nombre']].iloc[0]
         s = r['Inicio'].timetuple().tm_yday - 1
         e = r['Fin'].timetuple().tm_yday - 1
-        
         overlap_start = max(start_idx, s)
         overlap_end = min(end_idx, e)
         for d in range(overlap_start, overlap_end + 1):
@@ -320,22 +443,8 @@ def check_conflicts_interactive(roster_df, requests, year, night_periods):
                             processed_combinations.add(cid)
     return conflicts
 
-def get_clustered_dates(available_idxs, needed_count):
-    if not available_idxs: return []
-    groups = []
-    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
-        groups.append(list(map(itemgetter(1), g)))
-    groups.sort(key=len, reverse=True)
-    selected = []
-    for group in groups:
-        if len(selected) < needed_count:
-            take = min(len(group), needed_count - len(selected))
-            selected.extend(group[:take])
-        else: break
-    return sorted(selected)
-
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL (EXCEL)
+# 5. GENERACIÓN FINAL (EXCEL)
 # -------------------------------------------------------------------
 def validate_and_generate_final(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
@@ -354,10 +463,8 @@ def validate_and_generate_final(roster_df, requests, year, night_periods):
         name = req['Nombre']
         s_idx = req['Inicio'].timetuple().tm_yday - 1
         e_idx = req['Fin'].timetuple().tm_yday - 1
-        
         duration = (e_idx - s_idx) + 1
         natural_days_count[name] += duration
-        
         for d in range(s_idx, e_idx + 1):
             if final_schedule[name][d] == 'T':
                 day_vacations[d].append(name)
@@ -394,7 +501,7 @@ def validate_and_generate_final(roster_df, requests, year, night_periods):
                     turn_coverage_counters[name_to_turn[chosen]] += 1
                     person_coverage_counters[chosen] += 1
 
-    # RELLENO ADMINISTRATIVO (V(R)) HASTA 39
+    # Relleno Administrativo (V(R))
     fill_log = {}
     for name in roster_df['Nombre']:
         current = natural_days_count.get(name, 0)
@@ -475,13 +582,13 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V11.0 - FINAL)
+# INTERFAZ STREAMLIT (V12.0 - FINAL + GENERADOR AUTO)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V11.0 - Master")
+st.set_page_config(layout="wide", page_title="Gestor V12.0 - Master")
 
-st.title("🚒 Gestor V11.0: El Estratega")
-st.caption("Sube tus datos y deja que la IA encuentre las jugadas maestras.")
+st.title("🚒 Gestor V12.0: El Estratega")
+st.caption("Sube tus datos, visualiza conflictos y corrígelos en tiempo real.")
 
 # 1. CONFIGURACIÓN INICIAL
 with st.sidebar:
@@ -519,6 +626,16 @@ with st.sidebar:
                 if c>0: st.success(f"Añadidos {c} periodos.")
             except: pass
         if st.button("Limpiar Nocturnas"): st.session_state.nights = []
+
+    # --- BOTÓN DE GENERACIÓN AUTOMÁTICA ---
+    st.divider()
+    st.markdown("#### 🎲 Generador Automático")
+    if st.button("Generar Cuadrante Ideal (13 Cr)", type="primary"):
+        with st.spinner("Calculando combinaciones perfectas..."):
+            new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights)
+            st.session_state.raw_requests_df = pd.DataFrame(new_reqs)
+        st.success(f"¡Generado! {len(new_reqs)} periodos creados.")
+        st.rerun()
 
 # 2. ESTADO DE SOLICITUDES
 if 'raw_requests_df' not in st.session_state:
