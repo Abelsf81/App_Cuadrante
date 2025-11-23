@@ -92,21 +92,23 @@ def calculate_stats(roster_df, requests, year):
 # 2. MOTOR DE DRAFT (LA IA DE SELECCIÓN)
 # -------------------------------------------------------------------
 
-def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods):
+def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range):
     """
-    Genera TODAS las opciones válidas restantes para una persona,
-    teniendo en cuenta lo que YA han elegido los demás.
+    Genera TODAS las opciones válidas restantes para una persona.
     """
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
     
+    # Filtrar meses
+    start_month_idx = MESES.index(month_range[0]) + 1
+    end_month_idx = MESES.index(month_range[1]) + 1
+    
     # 1. Construir Mapa de Ocupación Actual (Lo que ya está cogido)
     occupation_map = {i:[] for i in range(total_days)}
-    my_current_slots = [] # Para no solaparse consigo mismo
+    my_current_slots = [] 
 
     for req in current_requests:
-        # Si es solicitud de OTRO, llena el mapa
         if req['Nombre'] != person_name:
             p_req = roster_df[roster_df['Nombre'] == req['Nombre']].iloc[0]
             s = req['Inicio'].timetuple().tm_yday - 1
@@ -114,46 +116,35 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
             for d in range(s, e+1):
                 if base_sch[p_req['Turno']][d] == 'T': occupation_map[d].append(p_req)
         else:
-            # Si es mía, la guardo para no pisarme
             s = req['Inicio'].timetuple().tm_yday - 1
             e = req['Fin'].timetuple().tm_yday - 1
             my_current_slots.append((s, e))
 
-    # 2. Buscar Bloques Disponibles
-    # Tipos de bloques a buscar:
-    # - 10 días (4 créditos) -> Gold
-    # - 10 días (3 créditos) -> Silver
-    # - 9 días (3 créditos) -> Bronze
-    
     options = {'gold': [], 'silver': [], 'bronze': []}
     
-    # Escanear el año
-    for d in range(total_days - 10): # Margen fin de año
-        
+    for d in range(total_days - 10): 
+        # Filtro fecha inicio por mes seleccionado
+        d_date = datetime.date(year, 1, 1) + timedelta(days=d)
+        if not (start_month_idx <= d_date.month <= end_month_idx): continue
+
         # --- ANALISIS DE BLOQUE DE 10 DÍAS ---
         duration = 10
         credits = 0
         valid = True
         
-        # Check básico
         for k in range(d, d+duration):
-            # Misma lógica de conflicto que el validador
             if base_sch[person['Turno']][k] == 'T':
                 credits += 1
-                # Conflicto Nocturna
                 d_obj = datetime.date(year, 1, 1) + timedelta(days=k)
                 if d_obj in transition_dates: valid = False; break
                 
-                # Conflicto Ocupación
                 occupants = occupation_map[k]
                 if len(occupants) >= 2: valid = False; break
                 for occ in occupants:
                     if occ['Turno'] == person['Turno']: valid = False; break
                     if person['Rol'] != 'Bombero' and occ['Rol'] == person['Rol']: valid = False; break
             
-            # Conflicto conmigo mismo (solape)
             for ms in my_current_slots:
-                # Margen de 2 días entre vacaciones
                 if not (k < ms[0] - 2 or k > ms[1] + 2): valid = False; break
             
             if not valid: break
@@ -186,7 +177,7 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
                 if not (k < ms[0] - 2 or k > ms[1] + 2): valid = False; break
             if not valid: break
             
-        if valid and credits == 3: # 9 dias suelen dar 3 creditos (o 2 si es muy raro)
+        if valid and credits == 3: 
              start_date = datetime.date(year, 1, 1) + timedelta(days=d)
              end_date = start_date + timedelta(days=duration-1)
              label = f"{start_date.strftime('%d/%m')} - {end_date.strftime('%d/%m')}"
@@ -317,7 +308,7 @@ def create_final_excel(roster_df, requests, year, night_periods):
                 turn_coverage[name_to_turn[chosen]] += 1
                 coverers_today_turns.add(name_to_turn[chosen])
 
-    # Relleno
+    # Relleno Visual
     for name in roster_df['Nombre']:
         needed = 39 - natural_days_count.get(name, 0)
         if needed > 0:
@@ -369,7 +360,8 @@ def create_final_excel(roster_df, requests, year, night_periods):
             curr_row += 2 
     
     ws2 = wb.create_sheet("Estadísticas")
-    ws2.append(["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas", "Total (Nat)"])
+    headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Vacs (Nat)"]
+    ws2.append(headers)
     for _, p in roster_df.iterrows():
         nm = p['Nombre']; sch = final_schedule[nm]
         cred = sch.count('V'); cov = counters[nm]
@@ -386,13 +378,13 @@ def create_final_excel(roster_df, requests, year, night_periods):
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V15.0 - SALA DE DRAFT)
+# INTERFAZ STREAMLIT (V15.1 - SALA DE DRAFT CON FILTRO MES Y SCROLL)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V15.0 - Sala de Draft")
+st.set_page_config(layout="wide", page_title="Gestor V15.1 - Sala de Draft")
 
-st.title("🚒 Gestor V15.0: Sala de Selección (Draft)")
-st.caption("Selecciona trabajador y elige fichas. La IA filtra lo que ya no está disponible.")
+st.title("🚒 Gestor V15.1: Sala de Selección (Draft)")
+st.caption("Selecciona trabajador y elige fichas. Usa el filtro de meses para ver más opciones.")
 
 # 1. CONFIGURACIÓN
 with st.sidebar:
@@ -442,9 +434,7 @@ c_main, c_vis = st.columns([1, 2])
 with c_main:
     st.subheader("2. Selección de Personal")
     
-    # Selector de Persona
     all_names = edited_df['Nombre'].tolist()
-    # Ordenar por Jerarquía visualmente
     names_sorted = sorted(all_names, key=lambda x: (
         0 if "Jefe" in x else 1 if "Subjefe" in x else 2 if "Cond" in x else 3
     ))
@@ -453,7 +443,6 @@ with c_main:
     
     if selected_person:
         st.markdown("---")
-        # Info Estado
         curr_stats = stats.get(selected_person, {'credits': 0, 'natural': 0})
         c = curr_stats['credits']
         remaining = 13 - c
@@ -461,52 +450,48 @@ with c_main:
         st.metric("Créditos Gastados", f"{c} / 13", delta=remaining, delta_color="normal")
         
         if remaining <= 0:
-            st.success("✅ Cupo de guardias cubierto. (Si quieres cambiar fechas, borra primero las de abajo)")
+            st.success("✅ Cupo cubierto.")
         else:
-            st.info(f"🔍 Buscando opciones válidas para {selected_person}...")
+            # FILTRO DE MESES
+            month_range = st.select_slider("📅 Filtrar sugerencias por meses:", options=MESES, value=(MESES[0], MESES[-1]))
             
-            # GENERAR OPCIONES
-            options = get_available_blocks_for_person(selected_person, edited_df, current_requests, year_val, st.session_state.nights)
+            st.info(f"🔍 Buscando bloques de {month_range[0]} a {month_range[1]}...")
             
-            # Tabs de opciones
+            options = get_available_blocks_for_person(selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range)
+            
             t_gold, t_silver, t_bronze = st.tabs([
-                "🏆 Gold (4 Cr / 10d)", 
-                "🥈 Silver (3 Cr / 10d)", 
-                "🥉 Bronze (3 Cr / 9d)"
+                "🏆 Gold (4 Cr)", 
+                "🥈 Silver (3 Cr - 10d)", 
+                "🥉 Bronze (3 Cr - 9d)"
             ])
             
             with t_gold:
-                if not options['gold']: st.warning("No quedan huecos de 4 créditos.")
-                else:
-                    st.caption(f"{len(options['gold'])} opciones disponibles")
-                    # Paginación simple
-                    for opt in options['gold'][:10]: # Mostrar max 10
-                        if st.button(f"➕ {opt['label']}", key=f"g_{opt['label']}"):
+                with st.container(height=300):
+                    if not options['gold']: st.write("Sin opciones.")
+                    for opt in options['gold']:
+                        if st.button(f"➕ {opt['label']}", key=f"g_{selected_person}_{opt['start']}"):
                             current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
                             st.session_state.raw_requests_df = pd.DataFrame(current_requests)
                             st.rerun()
                             
             with t_silver:
-                if not options['silver']: st.warning("No quedan huecos de 3 créditos (10d).")
-                else:
-                    st.caption(f"{len(options['silver'])} opciones disponibles")
-                    for opt in options['silver'][:10]:
-                        if st.button(f"➕ {opt['label']}", key=f"s_{opt['label']}"):
+                with st.container(height=300):
+                    if not options['silver']: st.write("Sin opciones.")
+                    for opt in options['silver']:
+                        if st.button(f"➕ {opt['label']}", key=f"s_{selected_person}_{opt['start']}"):
                             current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
                             st.session_state.raw_requests_df = pd.DataFrame(current_requests)
                             st.rerun()
                             
             with t_bronze:
-                if not options['bronze']: st.warning("No quedan huecos de 3 créditos (9d).")
-                else:
-                    st.caption(f"{len(options['bronze'])} opciones disponibles")
-                    for opt in options['bronze'][:10]:
-                        if st.button(f"➕ {opt['label']}", key=f"b_{opt['label']}"):
+                with st.container(height=300):
+                    if not options['bronze']: st.write("Sin opciones.")
+                    for opt in options['bronze']:
+                        if st.button(f"➕ {opt['label']}", key=f"b_{selected_person}_{opt['start']}"):
                             current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
                             st.session_state.raw_requests_df = pd.DataFrame(current_requests)
                             st.rerun()
 
-    # MIS SELECCIONES (Para borrar)
     st.markdown("---")
     st.write(f"**Mis Periodos ({selected_person}):**")
     my_reqs = [r for r in current_requests if r['Nombre'] == selected_person]
@@ -516,16 +501,12 @@ with c_main:
             c1, c2 = st.columns([4, 1])
             c1.write(f"{r['Inicio'].strftime('%d/%m')} - {r['Fin'].strftime('%d/%m')}")
             if c2.button("🗑️", key=f"del_{selected_person}_{i}"):
-                # Borrar por indice real es lioso, mejor reconstruir lista
-                # Borramos este elemento especifico de la lista global
                 current_requests.remove(r)
                 st.session_state.raw_requests_df = pd.DataFrame(current_requests)
                 st.rerun()
 
-
 with c_vis:
     st.subheader("3. Visor Global")
-    # Mostrar calendario visual
     base_sch, _ = generate_base_schedule(year_val)
     st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
     st.markdown(render_annual_calendar(year_val, 'B', base_sch, st.session_state.nights), unsafe_allow_html=True)
