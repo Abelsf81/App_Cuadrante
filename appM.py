@@ -181,23 +181,19 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 3. LÓGICA INTERACTIVA Y SUGERENCIAS
+# 3. MOTOR DE SUGERENCIAS Y VALIDACIÓN
 # -------------------------------------------------------------------
 
 def check_full_compliance(req, person, base_schedule_turn, roster_df, night_periods, total_days, current_requests, year):
-    """Valida una solicitud contra TODAS las reglas (Nocturna, Max 2, Mismo Turno, Categoría)."""
     start_idx = req['Inicio'].timetuple().tm_yday - 1
     end_idx = req['Fin'].timetuple().tm_yday - 1
     
-    # Construir mapa de ocupación (EXCLUYENDO a la propia persona actual para simular movimiento)
     occ_map = {i:[] for i in range(start_idx, end_idx + 1)}
     for r in current_requests:
-        if r['Nombre'] == person['Nombre']: continue # Importante: No chocar con uno mismo antiguo
-        
+        if r['Nombre'] == person['Nombre']: continue 
         p_req = roster_df[roster_df['Nombre'] == r['Nombre']].iloc[0]
         s = r['Inicio'].timetuple().tm_yday - 1
         e = r['Fin'].timetuple().tm_yday - 1
-        
         overlap_start = max(start_idx, s)
         overlap_end = min(end_idx, e)
         for d in range(overlap_start, overlap_end + 1):
@@ -221,8 +217,55 @@ def check_full_compliance(req, person, base_schedule_turn, roster_df, night_peri
                 
     return True
 
+def generate_suggestions_for_person(person_name, roster_df, current_requests, year, night_periods):
+    """Busca movimientos inteligentes."""
+    base_sch, total_days = generate_base_schedule(year)
+    person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
+    person_reqs = [r for r in current_requests if r['Nombre'] == person_name]
+    
+    suggestions = []
+    
+    for i, req in enumerate(person_reqs):
+        orig_start = req['Inicio']
+        orig_end = req['Fin']
+        
+        orig_credits = 0
+        s_idx = orig_start.timetuple().tm_yday - 1
+        e_idx = orig_end.timetuple().tm_yday - 1
+        for d in range(s_idx, e_idx + 1):
+            if base_sch[person['Turno']][d] == 'T': orig_credits += 1
+            
+        duration = (orig_end - orig_start).days
+        
+        for delta in range(-7, 8):
+            if delta == 0: continue
+            new_start = orig_start + datetime.timedelta(days=delta)
+            new_end = new_start + datetime.timedelta(days=duration)
+            
+            if new_start.year != year or new_end.year != year: continue
+            
+            new_credits = 0
+            ns_idx = new_start.timetuple().tm_yday - 1
+            ne_idx = new_end.timetuple().tm_yday - 1
+            for d in range(ns_idx, ne_idx + 1):
+                if base_sch[person['Turno']][d] == 'T': new_credits += 1
+            
+            if new_credits > orig_credits:
+                new_req_struct = {"Inicio": new_start, "Fin": new_end}
+                if check_full_compliance(new_req_struct, person, base_sch, roster_df, night_periods, total_days, current_requests, year):
+                    suggestions.append({
+                        "type": "move",
+                        "orig_req_obj": req,
+                        "new_start": new_start,
+                        "new_end": new_end,
+                        "gain": new_credits - orig_credits
+                    })
+    
+    suggestions.sort(key=lambda x: x['gain'], reverse=True)
+    return suggestions[:3]
+
 def find_valid_slot(person_name, duration, roster_df, year, night_periods, current_requests):
-    """Busca un hueco válido para 1 dia o N dias."""
+    """Busca un hueco válido para 1 dia."""
     base_sch, total_days = generate_base_schedule(year)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
     all_days = list(range(total_days))
@@ -232,13 +275,10 @@ def find_valid_slot(person_name, duration, roster_df, year, night_periods, curre
         end_idx = start_idx + duration - 1
         if end_idx >= total_days: continue
         
-        # Fecha
         start_date = datetime.date(year, 1, 1) + datetime.timedelta(days=start_idx)
         end_date = datetime.date(year, 1, 1) + datetime.timedelta(days=end_idx)
-        
         req_struct = {"Inicio": start_date, "Fin": end_date}
         
-        # Validar créditos (que al menos sume algo)
         credits = 0
         for d in range(start_idx, end_idx+1):
             if base_sch[person['Turno']][d] == 'T': credits += 1
@@ -249,16 +289,15 @@ def find_valid_slot(person_name, duration, roster_df, year, night_periods, curre
     return None
 
 def check_conflicts_interactive(roster_df, requests, year, night_periods):
-    """Analiza conflictos y devuelve objetos estructurados."""
+    """Analiza conflictos y devuelve objetos estructurados con IDs únicos."""
     base_schedule_turn, total_days = generate_base_schedule(year)
     occupation_map = {i: [] for i in range(total_days)}
     conflicts = []
     transition_dates = get_night_transition_dates(night_periods)
 
-    # Mapa de solicitudes
-    reqs_by_person = {} # Para saber qué request es
+    reqs_by_person = {} 
     for i, r in enumerate(requests):
-        r['id'] = i # Marcador temporal
+        r['id'] = i 
         reqs_by_person.setdefault(r['Nombre'], []).append(r)
 
     for req in requests:
@@ -269,12 +308,11 @@ def check_conflicts_interactive(roster_df, requests, year, night_periods):
         for d in range(s_idx, e_idx + 1):
             day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d)
             
-            # Conflicto Nocturna
             if day_obj in transition_dates:
                 if base_schedule_turn[person['Turno']][d] == 'T':
                     conflicts.append({
                         'type': 'Nocturna', 
-                        'msg': f"⛔ {person['Nombre']} trabaja en Fin Nocturna ({day_obj.strftime('%d/%m')})",
+                        'msg': f"⛔ {person['Nombre']} trabaja en FIN Nocturna ({day_obj.strftime('%d/%m')})",
                         'person': person['Nombre'],
                         'req_idx': req['id']
                     })
@@ -287,10 +325,8 @@ def check_conflicts_interactive(roster_df, requests, year, night_periods):
     for d, occupants in occupation_map.items():
         day_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=d)
         
-        # Conflicto Max 2
         if len(occupants) > 2:
             names = [o['p']['Nombre'] for o in occupants]
-            # Solo reportar una vez por grupo/día
             combo_id = f"max2_{d}_{sorted(names)}"
             if combo_id not in processed_combinations:
                 conflicts.append({
@@ -301,15 +337,12 @@ def check_conflicts_interactive(roster_df, requests, year, night_periods):
                 })
                 processed_combinations.add(combo_id)
         
-        # Conflicto Parejas
         if len(occupants) >= 2:
-            # Revisar todos contra todos
             for i in range(len(occupants)):
                 for j in range(i + 1, len(occupants)):
                     o1 = occupants[i]['p']
                     o2 = occupants[j]['p']
                     
-                    # Mismo Turno
                     if o1['Turno'] == o2['Turno']:
                         cid = f"turn_{d}_{sorted([o1['Nombre'], o2['Nombre']])}"
                         if cid not in processed_combinations:
@@ -321,7 +354,6 @@ def check_conflicts_interactive(roster_df, requests, year, night_periods):
                             })
                             processed_combinations.add(cid)
                             
-                    # Misma Categoría
                     if o1['Rol'] == o2['Rol'] and o1['Rol'] != "Bombero":
                         cid = f"cat_{d}_{sorted([o1['Nombre'], o2['Nombre']])}"
                         if cid not in processed_combinations:
@@ -456,13 +488,13 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V10.1 - INTERACTIVO + AUTO-RESOLVER CONFLICTOS)
+# INTERFAZ STREAMLIT (V10.2 - INTERACTIVO + NOCTURNAS FIXED + ANTI-24H + UNIQUE KEYS)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V10.1 - Estratega")
+st.set_page_config(layout="wide", page_title="Gestor V10.2 - Estratega")
 
-st.title("🚒 Gestor V10.1: El Estratega")
-st.caption("Sube tus datos, visualiza conflictos y resuélvelos con un clic.")
+st.title("🚒 Gestor V10.2: El Estratega")
+st.caption("Sube tus datos y deja que la IA encuentre las jugadas maestras.")
 
 # 1. CONFIGURACIÓN INICIAL
 with st.sidebar:
@@ -592,7 +624,6 @@ with c_stats:
                 else: last_req['Fin'] = last_day - datetime.timedelta(days=1)
             temp_reqs.extend(reqs)
         
-        # Guardar
         df_up = pd.DataFrame(temp_reqs)
         df_up['Inicio'] = pd.to_datetime(df_up['Inicio'])
         df_up['Fin'] = pd.to_datetime(df_up['Fin'])
@@ -604,19 +635,17 @@ with c_stats:
     
     if conflicts:
         st.error(f"⛔ {len(conflicts)} Conflictos")
-        for c in conflicts:
+        for i, c in enumerate(conflicts): # FIX: Use enumerate for unique keys
             with st.expander(c['msg']):
-                # Botón mágico de solución
-                # Intentamos mover a la primera persona involucrada
                 target_p = c.get('person') or (c.get('people')[0] if 'people' in c else None)
                 req_idx = c.get('req_idx') or (c.get('req_ids')[0] if 'req_ids' in c else None)
                 
                 if target_p and req_idx is not None:
-                    # Recuperar la solicitud original
                     orig_req = current_requests[req_idx]
                     duration = (orig_req['Fin'] - orig_req['Inicio']).days + 1
                     
-                    if st.button(f"⚡ Intentar Solucionar (Mover {target_p})", key=f"fix_{req_idx}"):
+                    # FIX: Add index 'i' to key to ensure uniqueness
+                    if st.button(f"⚡ Intentar Solucionar (Mover {target_p})", key=f"fix_{req_idx}_{i}"):
                         new_start = find_valid_slot(target_p, duration, edited_df, year_val, st.session_state.nights, current_requests)
                         if new_start:
                             new_end = new_start + datetime.timedelta(days=duration-1)
@@ -639,13 +668,44 @@ with c_stats:
         
         with st.expander(f"{name}: {c}/13", expanded=(c!=13)):
             if c < 13:
-                if st.button(f"➕ Añadir 1 día ({name})", key=f"add_{name}"):
-                    slot = find_valid_slot(name, 1, edited_df, year_val, st.session_state.nights, current_requests)
-                    if slot:
-                        current_requests.append({"Nombre": name, "Inicio": slot, "Fin": slot})
-                        st.session_state.raw_requests_df = pd.DataFrame(current_requests)
-                        st.rerun()
-                    else: st.error("Sin hueco.")
+                st.caption("💡 Sugerencias IA:")
+                suggestions = generate_suggestions_for_person(name, edited_df, current_requests, year_val, st.session_state.nights)
+                
+                if not suggestions:
+                    st.warning("No encuentro movimientos fáciles. Prueba a añadir 1 día suelto.")
+                    if st.button(f"➕ Añadir día suelto ({name})", key=f"add_{name}"):
+                        slot = find_valid_slot(name, 1, edited_df, year_val, st.session_state.nights, current_requests)
+                        if slot:
+                            current_requests.append({"Nombre": name, "Inicio": slot, "Fin": slot})
+                            st.session_state.raw_requests_df = pd.DataFrame(current_requests)
+                            st.rerun()
+                        else: st.error("Sin hueco.")
+                else:
+                    for i, sug in enumerate(suggestions):
+                        or_s = sug['orig_req_obj']['Inicio'].strftime('%d/%m')
+                        or_e = sug['orig_req_obj']['Fin'].strftime('%d/%m')
+                        nw_s = sug['new_start'].strftime('%d/%m')
+                        nw_e = sug['new_end'].strftime('%d/%m')
+                        gain = sug['gain']
+                        
+                        lbl = f"🔄 Mover {or_s}-{or_e} a {nw_s}-{nw_e} (+{gain} cred)"
+                        # Use explicit original object to find and replace
+                        if st.button(lbl, key=f"sug_{name}_{i}"):
+                            orig = sug['orig_req_obj']
+                            # Find index
+                            found_idx = -1
+                            for idx, r in enumerate(current_requests):
+                                if r['Nombre'] == orig['Nombre'] and r['Inicio'] == orig['Inicio'] and r['Fin'] == orig['Fin']:
+                                    found_idx = idx
+                                    break
+                            
+                            if found_idx != -1:
+                                current_requests[found_idx]['Inicio'] = sug['new_start']
+                                current_requests[found_idx]['Fin'] = sug['new_end']
+                                st.session_state.raw_requests_df = pd.DataFrame(current_requests)
+                                st.success("¡Aplicado!")
+                                st.rerun()
+
             elif c > 13:
                 if st.button(f"✂️ Recortar 1 día ({name})", key=f"trim_{name}"):
                     df_t = pd.DataFrame(current_requests)
