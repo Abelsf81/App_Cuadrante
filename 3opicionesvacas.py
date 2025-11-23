@@ -17,6 +17,51 @@ TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
+# DEFINICIÓN DE ESTRATEGIAS (La "Carta del Menú")
+STRATEGIES = {
+    "standard": {
+        "name": "🛡️ Estándar (Recomendada)",
+        "desc": "3 periodos de 10 días + 1 de 9 días.",
+        "blocks": [
+            {"dur": 10, "cred": 4, "label": "Bloque A (10d - 4Cr)"},
+            {"dur": 10, "cred": 3, "label": "Bloque B (10d - 3Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Bloque C (9d - 3Cr)"}
+        ],
+        "auto_recipe": [ # Para la IA automática (Objetivo 13)
+            {"dur": 10, "target": 4}, 
+            {"dur": 10, "target": 3}, 
+            {"dur": 10, "target": 3}, 
+            {"dur": 9, "target": 3}
+        ]
+    },
+    "long": {
+        "name": "✈️ Larga Estancia",
+        "desc": "2 periodos de 15 días + 1 de 9 días.",
+        "blocks": [
+            {"dur": 15, "cred": 5, "label": "Gran Viaje (15d - 5Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Escapada (9d - 3Cr)"}
+        ],
+        "auto_recipe": [
+            {"dur": 15, "target": 5}, 
+            {"dur": 15, "target": 5}, 
+            {"dur": 9, "target": 3}
+        ]
+    },
+    "micro": {
+        "name": "🐜 Hormiga (Micro-Periodos)",
+        "desc": "5 periodos de 6 días + 1 de 9 días.",
+        "blocks": [
+            {"dur": 6, "cred": 2, "label": "Semana (6d - 2Cr)"},
+            {"dur": 9, "cred": 3, "label": "Semana+ (9d - 3Cr)"}
+        ],
+        "auto_recipe": [
+            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
+            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
+            {"dur": 6, "target": 2}, {"dur": 9, "target": 3}
+        ]
+    }
+}
+
 # Plantilla por defecto
 DEFAULT_ROSTER = [
     {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
@@ -115,8 +160,10 @@ def check_global_conflict_generic(start_idx, duration, person, occupation_map, b
             
     return False
 
-def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range):
-    """Genera el MENÚ DE OPCIONES (Gold/Silver/Bronze) disponibles."""
+def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
+    """
+    Genera el MENÚ DE OPCIONES basado en la estrategia elegida (Standard, Long, Micro).
+    """
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -125,7 +172,7 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
     start_month_idx = MESES.index(month_range[0]) + 1
     end_month_idx = MESES.index(month_range[1]) + 1
     
-    # Mapa de ocupación actual (excluyéndose a sí mismo)
+    # Mapa de ocupación actual
     occupation_map = {i:[] for i in range(total_days)}
     my_current_slots = [] 
 
@@ -140,153 +187,91 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
         else:
             my_current_slots.append((s, e))
 
-    options = {'gold': [], 'silver': [], 'bronze': []}
+    # OBTENER TIPOS DE BLOQUE DE LA ESTRATEGIA
+    block_defs = STRATEGIES[strategy_key]['blocks']
+    options = {b['label']: [] for b in block_defs} # Diccionario dinámico
     
     # Escanear año
-    for d in range(total_days - 10): 
+    for d in range(total_days - 15): # Margen
         d_date = datetime.date(year, 1, 1) + timedelta(days=d)
         if not (start_month_idx <= d_date.month <= end_month_idx): continue
 
-        # --- BLOQUE 10 DÍAS ---
-        if not check_global_conflict_generic(d, 10, person, occupation_map, base_sch, year, transition_dates):
-            # Chequeo solapamiento propio
-            overlap = False
-            for ms in my_current_slots:
-                if not (d+9 < ms[0] - 2 or d > ms[1] + 2): overlap = True; break
+        # Analizar cada tipo de bloque definido en la estrategia
+        for b_def in block_defs:
+            duration = b_def['dur']
+            target_cred = b_def['cred']
+            label_key = b_def['label']
             
-            if not overlap:
-                credits = 0
-                for k in range(d, d+10):
-                    if base_sch[person['Turno']][k] == 'T': credits += 1
+            if not check_global_conflict_generic(d, duration, person, occupation_map, base_sch, year, transition_dates):
+                # Check solapamiento propio
+                overlap = False
+                for ms in my_current_slots:
+                    if not (d + duration - 1 < ms[0] - 2 or d > ms[1] + 2): overlap = True; break
                 
-                start_date = d_date
-                end_date = start_date + timedelta(days=9)
-                label = f"{start_date.strftime('%d/%m')} - {end_date.strftime('%d/%m')}"
-                
-                if credits == 4:
-                    options['gold'].append({'label': label, 'start': start_date, 'end': end_date})
-                elif credits == 3:
-                    options['silver'].append({'label': label, 'start': start_date, 'end': end_date})
-
-        # --- BLOQUE 9 DÍAS ---
-        if not check_global_conflict_generic(d, 9, person, occupation_map, base_sch, year, transition_dates):
-            overlap = False
-            for ms in my_current_slots:
-                if not (d+8 < ms[0] - 2 or d > ms[1] + 2): overlap = True; break
-            
-            if not overlap:
-                credits = 0
-                for k in range(d, d+9):
-                    if base_sch[person['Turno']][k] == 'T': credits += 1
-                
-                if credits == 3: 
-                     start_date = d_date
-                     end_date = start_date + timedelta(days=8)
-                     label = f"{start_date.strftime('%d/%m')} - {end_date.strftime('%d/%m')}"
-                     options['bronze'].append({'label': label, 'start': start_date, 'end': end_date})
+                if not overlap:
+                    credits = 0
+                    for k in range(d, d+duration):
+                        if base_sch[person['Turno']][k] == 'T': credits += 1
+                    
+                    if credits == target_cred:
+                        start_date = d_date
+                        end_date = start_date + timedelta(days=duration-1)
+                        txt = f"{start_date.strftime('%d/%m')} - {end_date.strftime('%d/%m')}"
+                        options[label_key].append({'label': txt, 'start': start_date, 'end': end_date})
 
     return options
 
-def auto_generate_schedule(roster_df, year, night_periods):
-    """El Arquitecto: Genera todo automáticamente."""
+def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
+    """El Arquitecto Multi-Estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
-    occupation_map = {} # {dia: [personas]}
+    occupation_map = {} 
     generated_requests = []
     
     people = roster_df.to_dict('records')
     priority_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
     people.sort(key=lambda x: priority_order.index(x['Rol']))
     
-    # Receta Maestra: 13 Créditos
-    RECIPE = [
-        {"dur": 10, "target": 4},
-        {"dur": 10, "target": 4}, # A veces se necesita 2 de 4, o 1 de 4 y 2 de 3.
-        {"dur": 10, "target": 3},
-        {"dur": 9,  "target": 2}  # El de 9 dias suele dar 3, ajustamos dinamicamente
-    ]
-    # Ajuste dinámico: Buscamos 4+4+3+2 = 13. O 4+3+3+3 = 13.
-    # La estrategia segura es buscar bloques que sumen.
+    # Obtener Receta de la estrategia
+    RECIPE = STRATEGIES[strategy_key]['auto_recipe']
     
     for person in people:
         my_slots = []
-        credits_got = 0
+        current_recipe = RECIPE.copy()
+        random.shuffle(current_recipe) # Variedad
         
-        # Intentar bloques grandes primero (10 dias / 4 creds)
-        # Buscamos hasta llegar a ~13
-        
-        # Paso 1: Bloques de 4 créditos (Max 2)
-        options_4 = []
-        for d in range(0, total_days-10):
-            if not check_global_conflict_generic(d, 10, person, occupation_map, base_sch, year, transition_dates):
-                c = sum([1 for k in range(d, d+10) if base_sch[person['Turno']][k] == 'T'])
-                if c == 4: options_4.append(d)
-        random.shuffle(options_4)
-        
-        for start in options_4:
-            if credits_got >= 8: break # Ya tenemos 2 de 4
-            overlap = any(start < s[0]+s[1]+2 and start+10 > s[0]-2 for s in my_slots)
-            if not overlap:
-                for k in range(start, start+10):
-                    if k not in occupation_map: occupation_map[k] = []
-                    occupation_map[k].append(person)
-                my_slots.append((start, 10))
-                credits_got += 4
-                generated_requests.append({
-                    "Nombre": person['Nombre'],
-                    "Inicio": datetime.date(year, 1, 1) + timedelta(days=start),
-                    "Fin": datetime.date(year, 1, 1) + timedelta(days=start+9)
-                })
-
-        # Paso 2: Bloques de 3 créditos
-        options_3 = []
-        for d in range(0, total_days-10):
-            if not check_global_conflict_generic(d, 10, person, occupation_map, base_sch, year, transition_dates):
-                c = sum([1 for k in range(d, d+10) if base_sch[person['Turno']][k] == 'T'])
-                if c == 3: options_3.append(d)
-        random.shuffle(options_3)
-
-        for start in options_3:
-            if credits_got >= 11: break # Solo necesitamos llegar a 13
-            overlap = any(start < s[0]+s[1]+2 and start+10 > s[0]-2 for s in my_slots)
-            if not overlap:
-                for k in range(start, start+10):
-                    if k not in occupation_map: occupation_map[k] = []
-                    occupation_map[k].append(person)
-                my_slots.append((start, 10))
-                credits_got += 3
-                generated_requests.append({
-                    "Nombre": person['Nombre'],
-                    "Inicio": datetime.date(year, 1, 1) + timedelta(days=start),
-                    "Fin": datetime.date(year, 1, 1) + timedelta(days=start+9)
-                })
-        
-        # Paso 3: Relleno final (dias sueltos o bloques de 9)
-        # Si faltan creditos, usamos días sueltos T para precisión quirúrgica
-        attempts = 0
-        while credits_got < 13 and attempts < 1000:
-            d = random.randint(0, total_days-1)
-            if base_sch[person['Turno']][d] == 'T':
-                if not check_global_conflict_generic(d, 1, person, occupation_map, base_sch, year, transition_dates):
-                    # Check overlap
-                    overlap = any(d < s[0]+s[1] and d >= s[0] for s in my_slots) # Estricto
-                    if not overlap:
-                         # Reservar
-                        if d not in occupation_map: occupation_map[d] = []
-                        occupation_map[d].append(person)
-                        my_slots.append((d, 1))
-                        credits_got += 1
-                        generated_requests.append({
-                            "Nombre": person['Nombre'],
-                            "Inicio": datetime.date(year, 1, 1) + timedelta(days=d),
-                            "Fin": datetime.date(year, 1, 1) + timedelta(days=d)
-                        })
-            attempts += 1
+        for block in current_recipe:
+            duration = block['dur']
+            target = block['target']
             
+            # Buscar opciones en todo el año
+            options = []
+            for d in range(0, total_days - duration):
+                if not check_global_conflict_generic(d, duration, person, occupation_map, base_sch, year, transition_dates):
+                    c = sum([1 for k in range(d, d+duration) if base_sch[person['Turno']][k] == 'T'])
+                    if c == target: options.append(d)
+            
+            random.shuffle(options)
+            
+            for start in options:
+                # Solapamiento propio
+                overlap = any(start < s[0]+s[1]+2 and start+duration > s[0]-2 for s in my_slots)
+                if not overlap:
+                    for k in range(start, start+duration):
+                        if k not in occupation_map: occupation_map[k] = []
+                        occupation_map[k].append(person)
+                    my_slots.append((start, duration))
+                    generated_requests.append({
+                        "Nombre": person['Nombre'],
+                        "Inicio": datetime.date(year, 1, 1) + timedelta(days=start),
+                        "Fin": datetime.date(year, 1, 1) + timedelta(days=start+duration-1)
+                    })
+                    break 
+
     return generated_requests
 
 # -------------------------------------------------------------------
-# 3. VISUALIZADOR Y EXCEL
+# 3. VISUALIZADOR HTML
 # -------------------------------------------------------------------
 def render_annual_calendar(year, team, base_sch, night_periods):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
@@ -320,6 +305,9 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     html += "</div>"
     return html
 
+# -------------------------------------------------------------------
+# 4. GENERACIÓN FINAL (EXCEL) Y FUNCIONES AUX
+# -------------------------------------------------------------------
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
@@ -504,13 +492,13 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V16.0 - EL HÍBRIDO)
+# INTERFAZ STREAMLIT (V17.0 - MULTI-ESTRATEGIA)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V16.0 - Híbrido")
+st.set_page_config(layout="wide", page_title="Gestor V17.0")
 
-st.title("🚒 Gestor V16.0: El Híbrido")
-st.caption("Modo Automático (Arquitecto) + Modo Manual (Copiloto).")
+st.title("🚒 Gestor V17.0: El Estratega")
+st.caption("Modo Copiloto: Elige estrategia y selecciona las mejores fechas.")
 
 # 1. CONFIGURACIÓN
 with st.sidebar:
@@ -540,21 +528,29 @@ with st.sidebar:
                     try:
                         v1 = row.iloc[0]; v2 = row.iloc[1]
                         if not pd.isnull(v1) and not pd.isnull(v2):
-                            d1 = pd.to_datetime(v1).date(); d2 = pd.to_datetime(v2).date()
+                            d1 = pd.to_datetime(v1).date()
+                            d2 = pd.to_datetime(v2).date()
                             st.session_state.nights.append((d1, d2)); c+=1
                     except: pass
-                if c>0: st.success(f"Añadidos {c} periodos.")
+                if c>0: st.success(f"Cargadas {c}")
             except: pass
         if st.button("Limpiar Nocturnas"): st.session_state.nights = []
 
-    # --- BOTÓN AUTOMÁTICO ---
+    # --- SELECTOR DE ESTRATEGIA ---
     st.divider()
-    st.markdown("#### 🎲 Modo Automático")
-    if st.button("Generar Cuadrante Ideal (13 Cr)", type="primary"):
-        with st.spinner("El Arquitecto está trabajando..."):
-            new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights)
+    strategy_key = st.selectbox(
+        "🎯 Estrategia de Vacaciones", 
+        options=list(STRATEGIES.keys()), 
+        format_func=lambda x: STRATEGIES[x]['name']
+    )
+    st.info(STRATEGIES[strategy_key]['desc'])
+
+    # BOTÓN AUTO
+    if st.button("🎲 Generar Automático", type="primary"):
+        with st.spinner("Generando..."):
+            new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights, strategy_key)
             st.session_state.raw_requests_df = pd.DataFrame(new_reqs)
-        st.success(f"¡Generado! {len(new_reqs)} periodos creados.")
+        st.success("¡Hecho!")
         st.rerun()
 
 # 2. ESTADO
@@ -563,13 +559,13 @@ if 'raw_requests_df' not in st.session_state:
 current_requests = st.session_state.raw_requests_df.to_dict('records')
 stats = calculate_stats(edited_df, current_requests, year_val)
 
-# 3. DRAFT ROOM
+# 3. DRAFT ROOM (COPILOTO)
 st.divider()
-st.subheader("2. Gestión Manual (Copiloto)")
-
 c_main, c_vis = st.columns([1, 2])
 
 with c_main:
+    st.subheader("2. Selección Manual (Copiloto)")
+    
     all_names = edited_df['Nombre'].tolist()
     names_sorted = sorted(all_names, key=lambda x: (0 if "Jefe" in x else 1 if "Subjefe" in x else 2 if "Cond" in x else 3))
     
@@ -587,36 +583,30 @@ with c_main:
             st.success("✅ Cupo cubierto.")
         else:
             month_range = st.select_slider("📅 Filtrar Meses:", options=MESES, value=(MESES[0], MESES[-1]))
-            st.info(f"🔍 Opciones válidas para {selected_person}...")
+            st.info(f"🔍 Buscando fichas de tipo: {STRATEGIES[strategy_key]['name']}")
             
-            options = get_available_blocks_for_person(selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range)
+            # OBTENER OPCIONES DINÁMICAS SEGÚN ESTRATEGIA
+            options = get_available_blocks_for_person(
+                selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range, strategy_key
+            )
             
-            t_gold, t_silver, t_bronze = st.tabs(["🏆 Gold (4 Cr)", "🥈 Silver (3 Cr)", "🥉 Bronze (3 Cr/9d)"])
+            # PESTAÑAS DINÁMICAS (Solo las que define la estrategia)
+            block_defs = STRATEGIES[strategy_key]['blocks']
+            tabs = st.tabs([b['label'] for b in block_defs])
             
-            with t_gold:
-                with st.container(height=200):
-                    if not options['gold']: st.write("Sin opciones.")
-                    for opt in options['gold']:
-                        if st.button(f"➕ {opt['label']}", key=f"g_{opt['label']}"):
-                            current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
-                            st.session_state.raw_requests_df = pd.DataFrame(current_requests)
-                            st.rerun()
-            with t_silver:
-                with st.container(height=200):
-                    if not options['silver']: st.write("Sin opciones.")
-                    for opt in options['silver']:
-                        if st.button(f"➕ {opt['label']}", key=f"s_{opt['label']}"):
-                            current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
-                            st.session_state.raw_requests_df = pd.DataFrame(current_requests)
-                            st.rerun()
-            with t_bronze:
-                with st.container(height=200):
-                    if not options['bronze']: st.write("Sin opciones.")
-                    for opt in options['bronze']:
-                        if st.button(f"➕ {opt['label']}", key=f"b_{opt['label']}"):
-                            current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
-                            st.session_state.raw_requests_df = pd.DataFrame(current_requests)
-                            st.rerun()
+            for i, b_def in enumerate(block_defs):
+                key = b_def['label']
+                with tabs[i]:
+                    available_opts = options.get(key, [])
+                    if not available_opts:
+                        st.warning("Sin opciones disponibles.")
+                    else:
+                        with st.container(height=200):
+                            for opt in available_opts[:20]: # Limitar visualización
+                                if st.button(f"➕ {opt['label']}", key=f"add_{selected_person}_{opt['start']}"):
+                                    current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
+                                    st.session_state.raw_requests_df = pd.DataFrame(current_requests)
+                                    st.rerun()
 
     st.markdown("---")
     st.write(f"**Mis Periodos:**")
