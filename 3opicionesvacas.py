@@ -221,6 +221,7 @@ def check_global_conflict_generic(start_idx, duration, person, occupation_map, b
     return False
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
+    """Genera el MENÚ DE OPCIONES DINÁMICO."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -268,6 +269,7 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
                         start_date = d_date
                         end_date = start_date + timedelta(days=duration-1)
                         txt = f"{start_date.strftime('%d/%m')} - {end_date.strftime('%d/%m')}"
+                        # AÑADIDO: Marcador visual de eficiencia (opcional)
                         options[label_key].append({'label': txt, 'start': start_date, 'end': end_date})
 
     return options
@@ -483,7 +485,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
         
-        # ORDENAR POR JERARQUIA
         members = roster_df[roster_df['Turno'] == t].copy()
         role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
         members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
@@ -527,7 +528,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         t_cover = counters[name]
         v_natural = sch.count('V') + sch.count('V(L)') + sch.count('V(R)')
         
-        # NUEVO: CÁLCULO DE DÍAS TRABAJADOS REALES
+        # CALCULO DIAS REALES TRABAJADOS
         total_worked = 0
         for s in sch:
             if s == 'T' or s.startswith('T*'): total_worked += 1
@@ -544,10 +545,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V27.0 - FINAL CON ESTADÍSTICAS COMPLETAS)
+# INTERFAZ STREAMLIT (V28.0 - CON SEMÁFORO DE EFICIENCIA)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V27.0")
+st.set_page_config(layout="wide", page_title="Gestor V28.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO Y AYUDA (LÉEME)", expanded=True):
@@ -557,26 +558,25 @@ def show_instructions():
         * **¡IMPORTANTE!** Marca la casilla **SV** a los bomberos que sean conductores sustitutos. Por defecto están todos desactivados. Si no marcas a nadie, los conductores no tendrán quien les cubra.
 
         ### 1️⃣ Preparar el Terreno
-        1.  **Año:** Verifica que es 2026.
-        2.  **Nocturnas:** Descarga la plantilla, rellénala y súbela. Esto bloquea los días prohibidos.
+        1.  **Asegura el Año:** Verifica que pone **2026**.
+        2.  **Carga las Nocturnas (VITAL):**
+            * Pulsa **"⬇️ Descargar Plantilla Nocturnas"**.
+            * Rellena el Excel y súbelo en el botón correspondiente.
         
         ### 2️⃣ Elegir la Estrategia
-        En el menú principal, elige el reparto (Menú "Estrategia"):
+        Elige cómo se repartirán los días (Menú "Estrategia"):
         * **Estándar:** 4 periodos (10+10+10+9 días).
         * **Matemática Pura:** 4 periodos (12+12+9+6 días).
-        * **Tridente:** 3 periodos (13+13+13 días).
-        * **Larga Estancia:** 3 periodos (15+15+9 días).
-        * **Hormiga:** 6 periodos (5 de 6 días + 1 de 9 días).
 
         ### 3️⃣ Asigna Vacaciones
-        * **Automático 🎲:** La IA lo hace todo.
+        * **Automático 🎲:** La IA calcula todo perfecto (13 créditos) en un clic.
         * **Manual 👨‍✈️:** Selecciona persona y elige fichas del menú.
 
         ### 4️⃣ Generar Excel Final
-        Si todo está verde, pulsa **"🚀 Generar Excel Final"**.
+        Si todo está correcto, pulsa **"🚀 Generar Excel Final"** abajo del todo.
         """)
 
-st.title("🚒 Gestor V27.0: El Tablero de Piezas")
+st.title("🚒 Gestor V28.0: El Tablero de Piezas")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 # MOSTRAR MANUAL
@@ -763,6 +763,21 @@ with c_main:
                 current_requests.remove(r)
                 st.session_state.raw_requests_df = pd.DataFrame(current_requests)
                 st.rerun()
+            
+    # --- NUEVO: EQUILIBRADOR SUAVE ---
+    if c != 13 and c >= 12:
+        st.divider()
+        st.markdown("#### ⚖️ Equilibrador Suave")
+        if st.button("Buscar 1 día de ajuste (Guardia)"):
+             # Buscar 1 dia suelto (1T) para cuadrar
+             slot = find_valid_slot(selected_person, 1, edited_df, year_val, st.session_state.nights, current_requests)
+             if slot:
+                 current_requests.append({"Nombre": selected_person, "Inicio": slot, "Fin": slot})
+                 st.session_state.raw_requests_df = pd.DataFrame(current_requests)
+                 st.success(f"Añadido día de ajuste: {slot}")
+                 st.rerun()
+             else:
+                 st.error("No hay hueco para ajuste.")
 
 with c_vis:
     if selected_person:
