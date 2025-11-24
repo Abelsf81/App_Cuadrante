@@ -90,7 +90,7 @@ STRATEGIES = {
     }
 }
 
-# Plantilla por defecto (TODOS SV FALSE POR DEFECTO)
+# Plantilla por defecto (SV False por defecto)
 DEFAULT_ROSTER = [
     {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Subjefe",    "SV": False},
@@ -221,7 +221,6 @@ def check_global_conflict_generic(start_idx, duration, person, occupation_map, b
     return False
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
-    """Genera el MENÚ DE OPCIONES DINÁMICO según estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -484,7 +483,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
         
-        # ORDENAMIENTO JERÁRQUICO
+        # ORDENAR POR JERARQUIA
         members = roster_df[roster_df['Turno'] == t].copy()
         role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
         members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
@@ -520,13 +519,20 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
             curr_row += 2 
     
     ws2 = wb.create_sheet("Estadísticas")
-    headers = ["Nombre", "Turno", "Puesto", "Gastado (T)", "Coberturas (T*)", "Total Vacs (Nat)"]
+    headers = ["Nombre", "Turno", "Puesto", "Días Trabajados", "Gastado (T)", "Coberturas (T*)", "Total Vacs (Nat)"]
     ws2.append(headers)
     for _, p in roster_df.iterrows():
         name = p['Nombre']; sch = schedule[name]
-        v_credits = sch.count('V'); t_cover = counters[name]
+        v_credits = sch.count('V')
+        t_cover = counters[name]
         v_natural = sch.count('V') + sch.count('V(L)') + sch.count('V(R)')
-        ws2.append([name, p['Turno'], p['Rol'], v_credits, t_cover, v_natural])
+        
+        # NUEVO: CÁLCULO DE DÍAS TRABAJADOS REALES
+        total_worked = 0
+        for s in sch:
+            if s == 'T' or s.startswith('T*'): total_worked += 1
+            
+        ws2.append([name, p['Turno'], p['Rol'], total_worked, v_credits, t_cover, v_natural])
 
     ws4 = wb.create_sheet("Ajustes")
     ws4.append(["Fecha", "Cubre", "Ausente"])
@@ -538,28 +544,24 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V26.0)
+# INTERFAZ STREAMLIT (V27.0 - FINAL CON ESTADÍSTICAS COMPLETAS)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V26.0")
+st.set_page_config(layout="wide", page_title="Gestor V27.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO Y AYUDA (LÉEME)", expanded=True):
         st.markdown("""
         ### 0️⃣ PASO PREVIO: REVISAR LA PLANTILLA Y SV
-        Antes de nada, abre el desplegable **"Plantilla"** en la barra izquierda.
-        * **¿Quién es SV?** Marca la casilla **SV** (Sustituto de Vehículo) a los bomberos que tienen carnet y autorización para conducir.
-        * *Por qué es importante:* Si un Conductor se va de vacaciones, la App buscará cubrirlo con otro Conductor O con un Bombero que tenga el **SV marcado**. Si no marcas a nadie, el sistema se quedará sin opciones.
+        Abre el desplegable **"Plantilla"** a la izquierda.
+        * **¡IMPORTANTE!** Marca la casilla **SV** a los bomberos que sean conductores sustitutos. Por defecto están todos desactivados. Si no marcas a nadie, los conductores no tendrán quien les cubra.
 
         ### 1️⃣ Preparar el Terreno
-        1.  **Asegura el Año:** Verifica que pone **2026**.
-        2.  **Carga las Nocturnas (VITAL):**
-            * Sin esto, el sistema no puede protegerte de doblar turnos en cambios de noche.
-            * Pulsa **"⬇️ Descargar Plantilla Nocturnas"**.
-            * Rellena el Excel y súbelo en el botón correspondiente.
+        1.  **Año:** Verifica que es 2026.
+        2.  **Nocturnas:** Descarga la plantilla, rellénala y súbela. Esto bloquea los días prohibidos.
         
         ### 2️⃣ Elegir la Estrategia
-        En el menú principal, decide cómo se repartirán los días (Menú "Estrategia"):
+        En el menú principal, elige el reparto (Menú "Estrategia"):
         * **Estándar:** 4 periodos (10+10+10+9 días).
         * **Matemática Pura:** 4 periodos (12+12+9+6 días).
         * **Tridente:** 3 periodos (13+13+13 días).
@@ -567,21 +569,14 @@ def show_instructions():
         * **Hormiga:** 6 periodos (5 de 6 días + 1 de 9 días).
 
         ### 3️⃣ Asigna Vacaciones
-        * **Botón Automático 🎲:** La IA calcula todo perfecto (13 créditos para todos) en un clic.
-        * **Modo Manual (Copiloto) 👨‍✈️:**
-            * Selecciona a una persona.
-            * Mira qué **"Piezas del Puzzle"** le faltan en el panel.
-            * Busca fichas válidas en las pestañas de abajo (Oro/Plata/Bronce) y añádelas.
+        * **Automático 🎲:** La IA lo hace todo.
+        * **Manual 👨‍✈️:** Selecciona persona y elige fichas del menú.
 
-        ### 4️⃣ El Semáforo de Conflictos
-        * ✅ **Verde:** Todo bien.
-        * ⛔ **Rojo:** Error grave (ej: pedir vacaciones el día que sales de noche).
-
-        ### 5️⃣ Generar Excel Final
-        Si todo está correcto, pulsa **"🚀 Generar Excel Final"** abajo del todo.
+        ### 4️⃣ Generar Excel Final
+        Si todo está verde, pulsa **"🚀 Generar Excel Final"**.
         """)
 
-st.title("🚒 Gestor V26.0: El Tablero de Piezas")
+st.title("🚒 Gestor V27.0: El Tablero de Piezas")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 # MOSTRAR MANUAL
@@ -596,14 +591,12 @@ with st.sidebar:
         if 'roster_data' not in st.session_state:
             st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
         
-        # Configuración del editor con CLAVE UNICA para evitar bugs
         column_cfg = {
             "ID_Puesto": st.column_config.TextColumn(disabled=True),
             "Turno": st.column_config.SelectboxColumn(options=TEAMS, required=True),
             "Rol": st.column_config.SelectboxColumn(options=ROLES, required=True),
             "SV": st.column_config.CheckboxColumn(label="¿Es SV?", help="Puede cubrir conductor", default=False)
         }
-        
         edited_df = st.data_editor(
             st.session_state.roster_data, 
             column_config=column_cfg,
@@ -658,9 +651,7 @@ with st.sidebar:
         format_func=lambda x: STRATEGIES[x]['name'],
         on_change=on_strategy_change
     )
-    # Mostrar descripción visual
-    strat_desc = STRATEGIES[strategy_key]['desc']
-    st.info(f"{strat_desc}")
+    st.info(STRATEGIES[strategy_key]['desc'])
 
     # BOTÓN AUTO
     if st.button("🎲 Generar Automático", type="primary"):
@@ -696,17 +687,15 @@ with c_main:
         
         st.metric("Créditos Totales", f"{c} / 13", delta=remaining, delta_color="normal")
         
-        # --- TABLERO DE PIEZAS DEL PUZZLE (DETALLADO) ---
+        # --- TABLERO DE PIEZAS DEL PUZZLE ---
         st.markdown("#### 🧩 Piezas del Puzzle (Duración + Créditos)")
         
-        # 1. Calcular qué pide la receta (Required)
         recipe = STRATEGIES[strategy_key]['auto_recipe']
         req_counts = {}
         for item in recipe:
             key = (item['dur'], item['target'])
             req_counts[key] = req_counts.get(key, 0) + 1
             
-        # 2. Calcular qué tiene el usuario (Current)
         my_reqs = [r for r in current_requests if r['Nombre'] == selected_person]
         base_sch_temp, _ = generate_base_schedule(year_val)
         person_row = edited_df[edited_df['Nombre'] == selected_person].iloc[0]
@@ -721,7 +710,6 @@ with c_main:
             key = (dur, cred_block)
             curr_counts[key] = curr_counts.get(key, 0) + 1
         
-        # 3. Visualizar Contadores
         sorted_keys = sorted(req_counts.keys(), key=lambda x: (-x[0], -x[1]))
         
         cols_puzzle = st.columns(len(sorted_keys))
