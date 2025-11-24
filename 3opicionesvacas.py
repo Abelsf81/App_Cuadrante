@@ -17,76 +17,54 @@ TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-# --- ESTRATEGIAS DE VACACIONES ---
+# --- ESTRATEGIAS ---
 STRATEGIES = {
     "standard": {
         "name": "🛡️ Estándar (4 Bloques)",
-        "desc": "10+10+10+9 días. Requiere iniciar uno en T para cuadrar.",
+        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
             {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Bloque 9d (3 Cr)"}
         ],
-        "auto_recipe": [ 
-            {"dur": 10, "target": 4}, 
-            {"dur": 10, "target": 3}, 
-            {"dur": 10, "target": 3}, 
-            {"dur": 9, "target": 3}
-        ]
+        "auto_recipe": [ {"dur": 10, "target": 4}, {"dur": 10, "target": 3}, {"dur": 10, "target": 3}, {"dur": 9, "target": 3} ]
     },
     "safe": {
         "name": "🔢 Matemática Pura (4 Bloques)",
-        "desc": "12+12+9+6 días. Indestructible: Múltiplos de 3 siempre cuadran.",
+        "desc": "12+12+9+6 días. Indestructible.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
             {"dur": 6,  "cred": 2, "label": "Corto 6d (2 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 12, "target": 4}, 
-            {"dur": 12, "target": 4}, 
-            {"dur": 9, "target": 3},
-            {"dur": 6, "target": 2}
-        ]
+        "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
     },
     "balanced": {
         "name": "⚖️ Tridente (3 Bloques)",
-        "desc": "13+13+13 días. Reparto equitativo del año.",
+        "desc": "13+13+13 días.",
         "blocks": [
             {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
             {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 13, "target": 5}, 
-            {"dur": 13, "target": 4}, 
-            {"dur": 13, "target": 4}
-        ]
+        "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
     },
     "long": {
         "name": "✈️ Larga Estancia (3 Bloques)",
-        "desc": "15+15+9 días. Ideal para viajes largos.",
+        "desc": "15+15+9 días.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 15, "target": 5}, 
-            {"dur": 15, "target": 5}, 
-            {"dur": 9, "target": 3}
-        ]
+        "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
     },
     "micro": {
         "name": "🐜 Hormiga (6 Bloques)",
-        "desc": "5x6 días + 1x9 días. Muchos cortes pequeños.",
+        "desc": "5x6 días + 1x9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
             {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
-            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
-            {"dur": 6, "target": 2}, {"dur": 9, "target": 3}
-        ]
+        "auto_recipe": [ {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 9, "target": 3} ]
     }
 }
 
@@ -115,36 +93,31 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. UTILIDADES
+# 1. UTILIDADES Y HELPERS
 # -------------------------------------------------------------------
 
 def get_short_id(name, role, turn):
-    """Genera IDs cortos para el Excel: Jefe A -> JA, Bombero A1 -> B1A."""
-    if "Jefe" in role and "Sub" not in role: return f"J{turn}"
-    if "Subjefe" in role: return f"S{turn}"
-    if "Cond" in role: return f"C{turn}"
-    # Para bomberos, intentamos sacar el numero
+    """Genera abreviaturas: Jefe A -> JA, Bombero B1 -> B1B."""
+    if role == "Jefe": return f"J{turn}"
+    if role == "Subjefe": return f"S{turn}"
+    if role == "Conductor": return f"C{turn}"
     if "Bombero" in name:
+        # Bombero A1 -> B1A
         parts = name.split()
         if len(parts) > 1:
-            # Suponemos formato "Bombero A1" -> "B1" + "A" (redundante pero claro)
-            # O mejor: "Bombero A1" -> "B1A"
-            # Cogemos la ultima parte "A1", "B2"
-            suffix = parts[-1] # A1
-            # Queremos B + numero + Turno. Si suffix es A1 -> B1A
+            suffix = parts[-1] # "A1"
             if len(suffix) >= 2:
-                 num = suffix[-1] # 1
-                 return f"B{num}{turn}"
+                num = suffix[-1] # "1"
+                return f"B{num}{turn}"
     return f"{name[:3]}{turn}"
 
 def generate_night_template():
-    """Genera un Excel vacío para rellenar nocturnas."""
+    """Genera Excel vacío para nocturnas."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Plan Nocturnas"
-    ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Turno (Opcional)", "Notas"])
-    # Ejemplo
-    ws.append(["2026-01-10", "2026-01-12", "A", "Ejemplo"])
+    ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
+    ws.append(["2026-01-10", "2026-01-12", "Ejemplo"])
     out = io.BytesIO()
     wb.save(out)
     out.seek(0)
@@ -349,7 +322,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL (EXCEL) Y AUXILIARES
+# 4. GENERACIÓN FINAL Y AUXILIARES
 # -------------------------------------------------------------------
 def get_clustered_dates(available_idxs, needed_count):
     if not available_idxs: return []
@@ -492,7 +465,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
         
-        # ORDENAMIENTO JERÁRQUICO (NUEVO)
+        # ORDENAMIENTO Y LIMPIEZA VISUAL
         members = roster_df[roster_df['Turno'] == t].copy()
         role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
         members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
@@ -516,14 +489,13 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         elif st_val == 'V': fill = s_V; val = "V"
                         elif st_val.startswith('V('): fill = s_VR; val = "v"
                         elif st_val.startswith('T*'): 
-                            # NOTACIÓN CORTA: T*(JA)
-                            fill = s_Cov
-                            missing_name = st_val.split('(')[1][:-1]
-                            # Buscar rol y turno del ausente para ID corto
-                            missing_p = roster_df[roster_df['Nombre'] == missing_name].iloc[0]
-                            short_id = get_short_id(missing_name, missing_p['Rol'], missing_p['Turno'])
-                            val = f"Cubre:{short_id}"
-                            cell.font = font_red
+                            fill = s_Cov; cell.font = font_red
+                            # Limpieza de etiqueta: De "T*(Jefe A)" a "JA"
+                            raw_name = st_val.split('(')[1][:-1]
+                            # Buscar datos de ese nombre para generar ID corto
+                            cov_p = roster_df[roster_df['Nombre'] == raw_name].iloc[0]
+                            val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
+                        
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -549,12 +521,12 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V18.1)
+# INTERFAZ STREAMLIT (V19.1 - FINAL POLISH)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V18.1")
+st.set_page_config(layout="wide", page_title="Gestor V19.1")
 
-st.title("🚒 Gestor V18.1: El Híbrido")
+st.title("🚒 Gestor V19.1: El Híbrido")
 st.caption("Modo Copiloto: Elige estrategia y selecciona las mejores fechas.")
 
 # 1. CONFIGURACIÓN
@@ -577,7 +549,7 @@ with st.sidebar:
             if dn_s and dn_e: st.session_state.nights.append((dn_s, dn_e))
         st.write(f"Periodos: {len(st.session_state.nights)}")
         
-        # BOTÓN DESCARGAR PLANTILLA
+        # BOTÓN DESCARGAR PLANTILLA (RECUPERADO)
         st.download_button(
             label="⬇️ Descargar Plantilla Nocturnas",
             data=generate_night_template(),
@@ -686,11 +658,17 @@ with c_main:
                 st.rerun()
 
 with c_vis:
-    st.subheader("3. Visor Global")
-    base_sch, _ = generate_base_schedule(year_val)
-    st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
-    st.markdown(render_annual_calendar(year_val, 'B', base_sch, st.session_state.nights), unsafe_allow_html=True)
-    st.markdown(render_annual_calendar(year_val, 'C', base_sch, st.session_state.nights), unsafe_allow_html=True)
+    # VISOR DINÁMICO
+    if selected_person:
+        p_row = edited_df[edited_df['Nombre'] == selected_person].iloc[0]
+        turn = p_row['Turno']
+        st.subheader(f"3. Visor Turno {turn} ({selected_person})")
+        base_sch, _ = generate_base_schedule(year_val)
+        st.markdown(render_annual_calendar(year_val, turn, base_sch, st.session_state.nights), unsafe_allow_html=True)
+    else:
+        st.subheader("3. Visor Global")
+        base_sch, _ = generate_base_schedule(year_val)
+        st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
 
 # 4. FINAL
 st.divider()
