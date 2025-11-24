@@ -115,8 +115,40 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. LÓGICA BASE
+# 1. UTILIDADES
 # -------------------------------------------------------------------
+
+def get_short_id(name, role, turn):
+    """Genera IDs cortos para el Excel: Jefe A -> JA, Bombero A1 -> B1A."""
+    if "Jefe" in role and "Sub" not in role: return f"J{turn}"
+    if "Subjefe" in role: return f"S{turn}"
+    if "Cond" in role: return f"C{turn}"
+    # Para bomberos, intentamos sacar el numero
+    if "Bombero" in name:
+        parts = name.split()
+        if len(parts) > 1:
+            # Suponemos formato "Bombero A1" -> "B1" + "A" (redundante pero claro)
+            # O mejor: "Bombero A1" -> "B1A"
+            # Cogemos la ultima parte "A1", "B2"
+            suffix = parts[-1] # A1
+            # Queremos B + numero + Turno. Si suffix es A1 -> B1A
+            if len(suffix) >= 2:
+                 num = suffix[-1] # 1
+                 return f"B{num}{turn}"
+    return f"{name[:3]}{turn}"
+
+def generate_night_template():
+    """Genera un Excel vacío para rellenar nocturnas."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Plan Nocturnas"
+    ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Turno (Opcional)", "Notas"])
+    # Ejemplo
+    ws.append(["2026-01-10", "2026-01-12", "A", "Ejemplo"])
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out
 
 def generate_base_schedule(year):
     is_leap = calendar.isleap(year)
@@ -282,21 +314,10 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
     return generated_requests
 
 # -------------------------------------------------------------------
-# 3. VISUALIZADOR HTML (MEJORADO CON LEYENDA)
+# 3. VISUALIZADOR HTML
 # -------------------------------------------------------------------
-def render_annual_calendar(year, team, base_sch, night_periods, highlight_turn=False):
+def render_annual_calendar(year, team, base_sch, night_periods):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
-    
-    # Leyenda
-    if highlight_turn:
-        html += """
-        <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
-            <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Día)</span>
-            <span style='background:#28a745; color:white; padding:2px 5px; border:1px solid #1e7e34;'>T (Noche)</span>
-            <span style='border:2px solid red; padding:0px 5px; color:red;'>Fin Noche (Prohibido)</span>
-        </div>
-        """
-
     html += "<div style='display:flex; margin-bottom:2px;'><div style='width:30px;'></div>"
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
@@ -328,8 +349,22 @@ def render_annual_calendar(year, team, base_sch, night_periods, highlight_turn=F
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL (EXCEL)
+# 4. GENERACIÓN FINAL (EXCEL) Y AUXILIARES
 # -------------------------------------------------------------------
+def get_clustered_dates(available_idxs, needed_count):
+    if not available_idxs: return []
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    groups.sort(key=len, reverse=True)
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else: break
+    return sorted(selected)
+
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
@@ -366,20 +401,6 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
             
         if is_compatible: candidates.append(candidate['Nombre'])
     return candidates
-
-def get_clustered_dates(available_idxs, needed_count):
-    if not available_idxs: return []
-    groups = []
-    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
-        groups.append(list(map(itemgetter(1), g)))
-    groups.sort(key=len, reverse=True)
-    selected = []
-    for group in groups:
-        if len(selected) < needed_count:
-            take = min(len(group), needed_count - len(selected))
-            selected.extend(group[:take])
-        else: break
-    return sorted(selected)
 
 def validate_and_generate_final(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
@@ -462,7 +483,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     border_all = Border(left=border_thin, right=border_thin, top=border_thin, bottom=border_thin)
 
     ws1 = wb.active; ws1.title = "Cuadrante"
-    ws1.column_dimensions['A'].width = 15
+    ws1.column_dimensions['A'].width = 20
     for i in range(2, 34): ws1.column_dimensions[get_column_letter(i)].width = 4
     
     curr_row = 1
@@ -470,7 +491,13 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         ws1.merge_cells(start_row=curr_row, start_column=1, end_row=curr_row, end_column=32)
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
-        members = roster_df[roster_df['Turno'] == t]
+        
+        # ORDENAMIENTO JERÁRQUICO (NUEVO)
+        members = roster_df[roster_df['Turno'] == t].copy()
+        role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
+        members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
+        members = members.sort_values(by=['sort_key', 'Nombre'])
+
         for _, p in members.iterrows():
             nm = p['Nombre']; role = p['Rol']
             ws1.cell(curr_row, 1, f"{nm} ({role})").font = font_bold
@@ -488,7 +515,15 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         if st_val == 'T': fill = s_T; val = "T"
                         elif st_val == 'V': fill = s_V; val = "V"
                         elif st_val.startswith('V('): fill = s_VR; val = "v"
-                        elif st_val.startswith('T*'): fill = s_Cov; val = "*"; cell.font = font_red
+                        elif st_val.startswith('T*'): 
+                            # NOTACIÓN CORTA: T*(JA)
+                            fill = s_Cov
+                            missing_name = st_val.split('(')[1][:-1]
+                            # Buscar rol y turno del ausente para ID corto
+                            missing_p = roster_df[roster_df['Nombre'] == missing_name].iloc[0]
+                            short_id = get_short_id(missing_name, missing_p['Rol'], missing_p['Turno'])
+                            val = f"Cubre:{short_id}"
+                            cell.font = font_red
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -514,12 +549,12 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V19.0 - DEFINITIVA)
+# INTERFAZ STREAMLIT (V18.1)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V19.0")
+st.set_page_config(layout="wide", page_title="Gestor V18.1")
 
-st.title("🚒 Gestor V19.0: El Híbrido")
+st.title("🚒 Gestor V18.1: El Híbrido")
 st.caption("Modo Copiloto: Elige estrategia y selecciona las mejores fechas.")
 
 # 1. CONFIGURACIÓN
@@ -541,6 +576,15 @@ with st.sidebar:
         if st.button("Añadir Nocturna"):
             if dn_s and dn_e: st.session_state.nights.append((dn_s, dn_e))
         st.write(f"Periodos: {len(st.session_state.nights)}")
+        
+        # BOTÓN DESCARGAR PLANTILLA
+        st.download_button(
+            label="⬇️ Descargar Plantilla Nocturnas",
+            data=generate_night_template(),
+            file_name="plantilla_nocturnas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
         uploaded_n = st.file_uploader("Excel Nocturnas", type=['xlsx'], key="n_up")
         if uploaded_n:
             try:
@@ -642,17 +686,11 @@ with c_main:
                 st.rerun()
 
 with c_vis:
-    # VISOR DINÁMICO
-    if selected_person:
-        p_row = edited_df[edited_df['Nombre'] == selected_person].iloc[0]
-        turn = p_row['Turno']
-        st.subheader(f"3. Visor Turno {turn} ({selected_person})")
-        base_sch, _ = generate_base_schedule(year_val)
-        st.markdown(render_annual_calendar(year_val, turn, base_sch, st.session_state.nights, highlight_turn=True), unsafe_allow_html=True)
-    else:
-        st.subheader("3. Visor Global")
-        base_sch, _ = generate_base_schedule(year_val)
-        st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
+    st.subheader("3. Visor Global")
+    base_sch, _ = generate_base_schedule(year_val)
+    st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
+    st.markdown(render_annual_calendar(year_val, 'B', base_sch, st.session_state.nights), unsafe_allow_html=True)
+    st.markdown(render_annual_calendar(year_val, 'C', base_sch, st.session_state.nights), unsafe_allow_html=True)
 
 # 4. FINAL
 st.divider()
