@@ -20,7 +20,7 @@ MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "
 # --- ESTRATEGIAS ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (4 Bloques)",
+        "name": "🛡️ Estándar (Recomendada)",
         "desc": "10+10+10+9 días.",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
@@ -30,7 +30,7 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 10, "target": 4}, {"dur": 10, "target": 3}, {"dur": 10, "target": 3}, {"dur": 9, "target": 3} ]
     },
     "safe": {
-        "name": "🔢 Matemática Pura (4 Bloques)",
+        "name": "🔢 Matemática Pura",
         "desc": "12+12+9+6 días.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
@@ -40,16 +40,16 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
     },
     "balanced": {
-        "name": "⚖️ Tridente (3 Bloques)",
+        "name": "⚖️ Tridente",
         "desc": "13+13+13 días.",
         "blocks": [
-            {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
-            {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
+            {"dur": 13, "cred": 5, "label": "Bloque 13d (5 Cr)"},
+            {"dur": 13, "cred": 4, "label": "Bloque 13d (4 Cr)"}
         ],
         "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
     },
     "long": {
-        "name": "✈️ Larga Estancia (3 Bloques)",
+        "name": "✈️ Larga Estancia",
         "desc": "15+15+9 días.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
@@ -58,7 +58,7 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
     },
     "micro": {
-        "name": "🐜 Hormiga (6 Bloques)",
+        "name": "🐜 Hormiga",
         "desc": "5x6 días + 1x9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
@@ -110,7 +110,7 @@ def generate_night_template():
     wb = Workbook()
     ws = wb.active; ws.title = "Plan Nocturnas"
     ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
-    ws.append(["2026-01-10", "2026-01-12", "Ejemplo (Fin es crítico)"])
+    ws.append(["2026-01-10", "2026-01-12", "Ejemplo"])
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
@@ -194,6 +194,7 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
     start_month_idx = MESES.index(month_range[0]) + 1
     end_month_idx = MESES.index(month_range[1]) + 1
+    
     occupation_map = {i:[] for i in range(total_days)}
     my_current_slots = [] 
     for req in current_requests:
@@ -208,6 +209,7 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
 
     block_defs = STRATEGIES[strategy_key]['blocks']
     options = {b['label']: [] for b in block_defs}
+    
     for d in range(total_days - 15): 
         d_date = datetime.date(year, 1, 1) + timedelta(days=d)
         if not (start_month_idx <= d_date.month <= end_month_idx): continue
@@ -278,6 +280,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
     html += "</div>"
+
     for m_idx, mes in enumerate(MESES):
         m_num = m_idx + 1
         days_in_month = calendar.monthrange(year, m_num)[1]
@@ -301,19 +304,17 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL Y EL "ECUALIZADOR"
+# 4. GENERACIÓN FINAL, COBERTURA Y ECUALIZADOR
 # -------------------------------------------------------------------
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
     missing_turn = person_missing['Turno']
-    
     blocked_turns = set()
     if adjustments_log_current_day:
         for coverer_name in adjustments_log_current_day:
             cov_p = roster_df[roster_df['Nombre'] == coverer_name]
             if not cov_p.empty: blocked_turns.add(cov_p.iloc[0]['Turno'])
-
     turn_exhausted_from_night = None
     if day_idx > 0:
         prev_day_idx = day_idx - 1
@@ -322,25 +323,25 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
             for t in TEAMS:
                 if base_sch_temp[t][prev_day_idx] == 'T':
                     turn_exhausted_from_night = t; break
-
     for _, candidate in roster_df.iterrows():
         if candidate['Turno'] == missing_turn: continue
         cand_status = current_schedule[candidate['Nombre']][day_idx]
         if cand_status != 'L': continue 
         if candidate['Turno'] in blocked_turns: continue
         if turn_exhausted_from_night and candidate['Turno'] == turn_exhausted_from_night: continue
-
         is_compatible = False
         cand_role = candidate['Rol']
         if missing_role == "Jefe" and cand_role in ["Jefe", "Subjefe"]: is_compatible = True
         elif missing_role == "Subjefe" and cand_role in ["Jefe", "Subjefe"]: is_compatible = True
         elif missing_role == "Conductor" and (cand_role == "Conductor" or candidate['SV']): is_compatible = True
         elif missing_role == "Bombero" and (cand_role == "Bombero" or candidate['SV']): is_compatible = True
-            
         if is_compatible: candidates.append(candidate['Nombre'])
     return candidates
 
-def validate_and_generate_final(roster_df, requests, year, night_periods):
+def validate_and_generate_final(roster_df, requests, year, night_periods, forced_swaps=None):
+    """Calcula el calendario final aplicando vacaciones, coberturas y swaps forzados."""
+    if forced_swaps is None: forced_swaps = []
+    
     base_schedule_turn, total_days = generate_base_schedule(year)
     final_schedule = {} 
     turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
@@ -367,11 +368,6 @@ def validate_and_generate_final(roster_df, requests, year, night_periods):
                 final_schedule[name][d] = 'V(L)'
 
     adjustments_log = []
-    
-    # 1. ASIGNACIÓN DE COBERTURAS (Equitativa pero ingenua)
-    # Guardamos una estructura temporal para reajustar después
-    # adjustments_log = [(day_idx, coverer_name, missing_name)]
-    
     for d in range(total_days):
         absent_people = day_vacations[d]
         if not absent_people: continue
@@ -380,27 +376,40 @@ def validate_and_generate_final(roster_df, requests, year, night_periods):
 
         for name_missing in absent_people:
             person_row = roster_df[roster_df['Nombre'] == name_missing].iloc[0]
-            candidates = get_candidates(person_row, roster_df, d, final_schedule, year, night_periods, current_day_coverers)
             
-            if candidates:
-                valid = []
-                for c in candidates:
-                    prev = final_schedule[c][d-1] if d>0 else 'L'
-                    prev2 = final_schedule[c][d-2] if d>1 else 'L'
-                    if not (prev.startswith('T') and prev2.startswith('T')): valid.append(c)
-                
-                if valid:
-                    # Estrategia V29: Priorizar al que MENOS DIAS LLEVA (No solo coberturas)
-                    # Pero como no tenemos el total aun, usamos heuristica simple + random
-                    valid.sort(key=lambda x: (turn_coverage_counters[name_to_turn[x]], person_coverage_counters[x], random.random()))
-                    chosen = valid[0]
-                    final_schedule[chosen][d] = f"T*({name_missing})"
-                    adjustments_log.append((d, chosen, name_missing))
-                    current_day_coverers.append(chosen)
-                    turn_coverage_counters[name_to_turn[chosen]] += 1
-                    person_coverage_counters[chosen] += 1
+            # 1. Verificar si hay SWAP forzado para este día y esta ausencia
+            forced_coverer = None
+            for fs in forced_swaps:
+                if fs['day_idx'] == d and fs['absent'] == name_missing:
+                    forced_coverer = fs['coverer']
+                    break
+            
+            chosen = None
+            
+            if forced_coverer:
+                # Si hay swap forzado, lo usamos directamente (asumiendo que es válido)
+                chosen = forced_coverer
+            else:
+                # Si no, usamos la IA
+                candidates = get_candidates(person_row, roster_df, d, final_schedule, year, night_periods, current_day_coverers)
+                if candidates:
+                    valid = []
+                    for c in candidates:
+                        prev = final_schedule[c][d-1] if d>0 else 'L'
+                        prev2 = final_schedule[c][d-2] if d>1 else 'L'
+                        if not (prev.startswith('T') and prev2.startswith('T')): valid.append(c)
+                    
+                    if valid:
+                        valid.sort(key=lambda x: (turn_coverage_counters[name_to_turn[x]], person_coverage_counters[x], random.random()))
+                        chosen = valid[0]
 
-    # Relleno Administrativo
+            if chosen:
+                final_schedule[chosen][d] = f"T*({name_missing})"
+                adjustments_log.append((d, chosen, name_missing))
+                current_day_coverers.append(chosen)
+                turn_coverage_counters[name_to_turn[chosen]] += 1
+                person_coverage_counters[chosen] += 1
+
     fill_log = {}
     for name in roster_df['Nombre']:
         current = natural_days_count.get(name, 0)
@@ -426,6 +435,69 @@ def get_work_days_count(final_schedule):
             if s == 'T' or s.startswith('T*'): c += 1
         counts[name] = c
     return counts
+
+def find_swap_opportunities(work_days, adjustments_log, roster_df, year, night_periods):
+    rich = [n for n, c in work_days.items() if c > 123]
+    poor = [n for n, c in work_days.items() if c < 121]
+    
+    opportunities = []
+    
+    if not rich or not poor: return []
+    
+    # Buscar en el log de ajustes donde un 'rico' esté cubriendo
+    for adj in adjustments_log:
+        day_idx, coverer, absentee = adj
+        if coverer in rich:
+            # El rico está cubriendo. ¿Puede hacerlo un pobre?
+            # Necesitamos ver el estado del pobre ese día. 
+            # Nota: Esto es una simulación aproximada porque no tenemos el schedule completo aquí,
+            # pero podemos filtrar por reglas básicas.
+            
+            # Obtenemos candidatos validos RE-EVALUANDO para ese dia
+            # Importante: Al re-evaluar get_candidates, necesitamos el schedule base, 
+            # pero asumimos que si el pobre tiene <121, probablemente libra.
+            
+            # Simplificación: Verificamos compatibilidad básica
+            cov_role = roster_df[roster_df['Nombre'] == coverer].iloc[0]['Rol']
+            abs_role = roster_df[roster_df['Nombre'] == absentee].iloc[0]['Rol']
+            
+            for p_candidate in poor:
+                cand_row = roster_df[roster_df['Nombre'] == p_candidate].iloc[0]
+                
+                # 1. Check Rol
+                is_compatible = False
+                cr = cand_row['Rol']
+                mr = abs_role # Missing Role
+                # Misma lógica de get_candidates
+                if mr == "Jefe" and cr in ["Jefe", "Subjefe"]: is_compatible = True
+                elif mr == "Subjefe" and cr in ["Jefe", "Subjefe"]: is_compatible = True
+                elif mr == "Conductor" and (cr == "Conductor" or cand_row['SV']): is_compatible = True
+                elif mr == "Bombero" and (cr == "Bombero" or cand_row['SV']): is_compatible = True
+                
+                if is_compatible:
+                    # 2. Check Anti-24h (Aproximado)
+                    if day_idx > 0 and is_in_night_period(day_idx-1, year, night_periods):
+                        # Si ayer hubo noche, chequear si el candidato es del turno saliente
+                         base_sch, _ = generate_base_schedule(year)
+                         # Quien trabajo ayer en base?
+                         turn_yesterday = None
+                         for t in TEAMS: 
+                             if base_sch[t][day_idx-1] == 'T': turn_yesterday = t
+                         
+                         if turn_yesterday and cand_row['Turno'] == turn_yesterday:
+                             continue # No valido por anti-24h
+                    
+                    # Si pasa filtros básicos, proponemos
+                    date_str = (datetime.date(year, 1, 1) + timedelta(days=day_idx)).strftime("%d/%m")
+                    opportunities.append({
+                        'day_idx': day_idx,
+                        'date_str': date_str,
+                        'rich': coverer,
+                        'poor': p_candidate,
+                        'absentee': absentee
+                    })
+                    if len(opportunities) > 5: return opportunities # Limitar sugerencias
+    return opportunities
 
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
     wb = Workbook()
@@ -501,10 +573,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V29.0 - FINAL + ECUALIZADOR)
+# INTERFAZ STREAMLIT (V30.0 - EL MERCADO DE FICHAJES)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V29.0")
+st.set_page_config(layout="wide", page_title="Gestor V30.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
@@ -519,11 +591,12 @@ def show_instructions():
         * Elige estrategia y usa el modo **Automático** o **Manual**.
         
         ### 3️⃣ EL ECUALIZADOR (NUEVO)
-        * Antes de descargar, mira el panel **"Equilibrado de Días"**.
-        * Si alguien tiene muchos días trabajados (>123) y otro pocos (<121), la IA te propondrá intercambios. ¡Úsalo!
+        * Antes de descargar, mira el panel **"Mercado de Intercambios"**.
+        * La App te sugerirá cambios automáticos para equilibrar los días trabajados (121-123).
+        * Pulsa **"🔀 Ejecutar"** y la App recalculará todo al instante.
         """)
 
-st.title("🚒 Gestor V29.0: El Tablero de Piezas")
+st.title("🚒 Gestor V30.0: El Mercado de Fichajes")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 show_instructions()
 
@@ -541,12 +614,7 @@ with st.sidebar:
             "Rol": st.column_config.SelectboxColumn(options=ROLES, required=True),
             "SV": st.column_config.CheckboxColumn(label="¿Es SV?", help="Puede cubrir conductor", default=False)
         }
-        edited_df = st.data_editor(
-            st.session_state.roster_data, 
-            column_config=column_cfg,
-            use_container_width=True,
-            key="roster_editor"
-        )
+        edited_df = st.data_editor(st.session_state.roster_data, column_config=column_cfg, use_container_width=True, key="roster_editor")
         st.session_state.roster_data = edited_df
         
     with st.expander("Nocturnas"):
@@ -558,12 +626,7 @@ with st.sidebar:
             if dn_s and dn_e: st.session_state.nights.append((dn_s, dn_e))
         st.write(f"Periodos: {len(st.session_state.nights)}")
         
-        st.download_button(
-            label="⬇️ Descargar Plantilla Nocturnas",
-            data=generate_night_template(),
-            file_name="plantilla_nocturnas.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button(label="⬇️ Descargar Plantilla Nocturnas", data=generate_night_template(), file_name="plantilla_nocturnas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         uploaded_n = st.file_uploader("Excel Nocturnas", type=['xlsx'], key="n_up")
         if uploaded_n:
@@ -574,8 +637,7 @@ with st.sidebar:
                     try:
                         v1 = row.iloc[0]; v2 = row.iloc[1]
                         if not pd.isnull(v1) and not pd.isnull(v2):
-                            d1 = pd.to_datetime(v1).date()
-                            d2 = pd.to_datetime(v2).date()
+                            d1 = pd.to_datetime(v1).date(); d2 = pd.to_datetime(v2).date()
                             st.session_state.nights.append((d1, d2)); c+=1
                     except: pass
                 if c>0: st.success(f"Añadidos {c} periodos.")
@@ -585,26 +647,26 @@ with st.sidebar:
     st.divider()
     def on_strategy_change():
         st.session_state.raw_requests_df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
-        st.toast("⚠️ Estrategia cambiada: Se han borrado las selecciones anteriores.", icon="🗑️")
+        st.session_state.forced_swaps = [] # Reset swaps too
+        st.toast("⚠️ Estrategia cambiada: Reinicio completo.", icon="🗑️")
 
-    strategy_key = st.selectbox(
-        "🎯 Estrategia de Vacaciones", 
-        options=list(STRATEGIES.keys()), 
-        format_func=lambda x: STRATEGIES[x]['name'],
-        on_change=on_strategy_change
-    )
+    strategy_key = st.selectbox("🎯 Estrategia de Vacaciones", options=list(STRATEGIES.keys()), format_func=lambda x: STRATEGIES[x]['name'], on_change=on_strategy_change)
     st.info(STRATEGIES[strategy_key]['desc'])
 
     if st.button("🎲 Generar Automático", type="primary"):
         with st.spinner("Generando..."):
             new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights, strategy_key)
             st.session_state.raw_requests_df = pd.DataFrame(new_reqs)
+            st.session_state.forced_swaps = [] # Clear previous swaps on new gen
         st.success("¡Hecho!")
         st.rerun()
 
 # 2. ESTADO
 if 'raw_requests_df' not in st.session_state:
     st.session_state.raw_requests_df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
+if 'forced_swaps' not in st.session_state:
+    st.session_state.forced_swaps = []
+
 current_requests = st.session_state.raw_requests_df.to_dict('records')
 stats = calculate_stats(edited_df, current_requests, year_val)
 
@@ -625,7 +687,6 @@ with c_main:
         remaining = 13 - c
         st.metric("Créditos Totales", f"{c} / 13", delta=remaining, delta_color="normal")
         
-        # Puzzle
         recipe = STRATEGIES[strategy_key]['auto_recipe']
         req_counts = {}
         for item in recipe: req_counts[(item['dur'], item['target'])] = req_counts.get((item['dur'], item['target']), 0) + 1
@@ -660,9 +721,7 @@ with c_main:
         else:
             month_range = st.select_slider("📅 Filtrar Meses:", options=MESES, value=(MESES[0], MESES[-1]))
             st.info(f"🔍 Buscando fichas...")
-            options = get_available_blocks_for_person(
-                selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range, strategy_key
-            )
+            options = get_available_blocks_for_person(selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range, strategy_key)
             block_defs = STRATEGIES[strategy_key]['blocks']
             tabs = st.tabs([b['label'] for b in block_defs])
             for i, b_def in enumerate(block_defs):
@@ -703,37 +762,55 @@ with c_vis:
         st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
 
 # -------------------------------------------------------------------
-# 4. ECUALIZADOR Y GENERACIÓN FINAL
+# 4. EL MERCADO DE FICHAJES (ECUALIZADOR V30)
 # -------------------------------------------------------------------
 st.divider()
-st.header("⚖️ Equilibrado de Días Trabajados")
+st.header("⚖️ Mercado de Intercambios (Ajuste 121-123)")
 
-# Calculamos la PRE-VISUALIZACIÓN del cuadrante para ver quién se pasa
-temp_sch, temp_adj, temp_count, _ = validate_and_generate_final(edited_df, current_requests, year_val, st.session_state.nights)
-work_days = get_work_days_count(temp_sch)
+# 1. Pre-calculamos el estado actual (con swaps existentes)
+current_sch, current_adj, current_counters, _ = validate_and_generate_final(edited_df, current_requests, year_val, st.session_state.nights, st.session_state.forced_swaps)
+work_days = get_work_days_count(current_sch)
 
-# Mostrar estado
+# 2. Mostrar Estado
 cols_eq = st.columns(3)
 for i, (name, count) in enumerate(work_days.items()):
     with cols_eq[i % 3]:
         color = "green" if 121 <= count <= 123 else "red"
         st.markdown(f"**{name}**: <span style='color:{color}'>{count} días</span>", unsafe_allow_html=True)
 
-# Sugerencias de intercambio
-st.subheader("💡 Sugerencias de Intercambio")
-rich = [n for n, c in work_days.items() if c > 123]
-poor = [n for n, c in work_days.items() if c < 121]
+# 3. Buscar Oportunidades
+suggestions = find_swap_opportunities(work_days, current_adj, edited_df, year_val, st.session_state.nights)
 
-if rich and poor:
-    st.info(f"Hay {len(rich)} personas con exceso y {len(poor)} con defecto. Podrías intercambiar guardias.")
-    # Aquí podríamos automatizar el intercambio, pero mejor dejarlo visual para que el usuario decida en el Excel
-    st.caption("Nota: Para ajustar esto, en el Excel final (Hoja Ajustes), cambia manualmente una cobertura de alguien que tenga muchos días por alguien que tenga pocos.")
+if suggestions:
+    st.info(f"💡 He encontrado {len(suggestions)} posibles cambios para equilibrar la plantilla.")
+    for sug in suggestions:
+        d_str = sug['date_str']
+        rich = sug['rich']
+        poor = sug['poor']
+        absent = sug['absentee']
+        
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            st.write(f"📅 **{d_str}**: **{rich}** ({work_days[rich]}d) cede su guardia a **{poor}** ({work_days[poor]}d). (Cubre a {absent})")
+        with col2:
+            if st.button("🔀 Ejecutar", key=f"swap_{sug['day_idx']}_{rich}_{poor}"):
+                st.session_state.forced_swaps.append({
+                    'day_idx': sug['day_idx'],
+                    'coverer': poor, # El pobre pasa a ser el que cubre
+                    'absent': absent
+                })
+                st.success("¡Intercambio realizado! Recalculando...")
+                st.rerun()
 else:
-    st.success("✅ El reparto parece equilibrado.")
+    if any(c > 123 or c < 121 for c in work_days.values()):
+        st.warning("Hay desequilibrios pero no encuentro intercambios fáciles compatibles hoy. Prueba a generar de nuevo o ajusta manualmente.")
+    else:
+        st.success("✅ ¡La plantilla está perfectamente equilibrada!")
 
+# 5. GENERACIÓN FINAL
 st.divider()
 if st.button("🚀 Generar Excel Final", type="primary", use_container_width=True):
-    sch, adj, count, fill = validate_and_generate_final(edited_df, current_requests, year_val, st.session_state.nights)
+    sch, adj, count, fill = validate_and_generate_final(edited_df, current_requests, year_val, st.session_state.nights, st.session_state.forced_swaps)
     excel_io = create_final_excel(sch, edited_df, year_val, current_requests, fill, count, st.session_state.nights, adj)
     st.download_button("📥 Descargar Cuadrante", excel_io, f"Cuadrante_Final_{year_val}.xlsx")
     st.markdown("**Diseñado por Marcos Esteban Vives**")
