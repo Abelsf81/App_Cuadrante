@@ -222,6 +222,7 @@ def check_global_conflict_generic(start_idx, duration, person, occupation_map, b
     return False
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
+    """Genera el MENÚ DE OPCIONES DINÁMICO según estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -537,31 +538,25 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V22.0 - DASHBOARD FINAL)
+# INTERFAZ STREAMLIT (V23.0 - PANEL DE PIEZAS DETALLADO)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V22.0")
+st.set_page_config(layout="wide", page_title="Gestor V23.0")
 
 def show_instructions():
-    with st.expander("📘 GUÍA RÁPIDA: Cómo usar el Tablero de Control", expanded=True):
+    with st.expander("📘 GUÍA: Cómo completar tu puzzle de vacaciones", expanded=True):
         st.markdown("""
-        ### 1. Elige tu Estrategia
-        En el menú de abajo, selecciona cómo quieres repartir tus días (Estándar, Matemática Pura, etc.).
+        **Objetivo:** Conseguir las piezas exactas que pide tu estrategia.
         
-        ### 2. Sigue los Indicadores
-        Al seleccionar un trabajador, verás dos tipos de contadores:
-        * 📊 **Créditos Totales:** Debes llegar a **13/13**.
-        * 🧩 **Piezas del Puzzle:** Debes completar los bloques que pide la estrategia (ej: 2 de 12 días).
-        
-        ### 3. Rellena los Huecos
-        * Si te faltan piezas, búscalas en las pestañas de abajo (Oro, Plata, Bronce) y añádelas.
-        * La App solo te mostrará fechas que **NO chocan** con tus compañeros.
-        
-        ### 4. ¿Atascado?
-        Usa el botón **"🎲 Generar Automático"** para que la IA haga un reparto perfecto y luego tú modificas lo que quieras.
+        1.  **Elige Estrategia:** (Abajo a la izquierda).
+        2.  **Selecciona tu nombre:** Verás qué piezas te faltan.
+        3.  **Completa los huecos:**
+            * Busca en las pestañas (Oro/Plata/Bronce).
+            * Fíjate que hay fichas de **4 Créditos** y de **3 Créditos**.
+            * Debes coger exactamente lo que te pide el contador (ej: 1 de 4Cr y 2 de 3Cr).
         """)
 
-st.title("🚒 Gestor V22.0: Tablero de Control")
+st.title("🚒 Gestor V23.0: El Tablero de Piezas")
 
 # 1. CONFIGURACIÓN
 with st.sidebar:
@@ -659,35 +654,51 @@ with c_main:
         c = curr_stats['credits']
         remaining = 13 - c
         
-        # METRICA PRINCIPAL
         st.metric("Créditos Totales", f"{c} / 13", delta=remaining, delta_color="normal")
         
-        # --- TABLERO DE PIEZAS DEL PUZZLE (GAMIFICACIÓN) ---
-        st.markdown("#### 🧩 Piezas del Puzzle")
+        # --- TABLERO DE PIEZAS DEL PUZZLE (DETALLADO) ---
+        st.markdown("#### 🧩 Piezas del Puzzle (Duración + Créditos)")
         
-        # Calcular qué pide la estrategia
+        # 1. Calcular qué pide la receta (Required)
         recipe = STRATEGIES[strategy_key]['auto_recipe']
-        required_durs = [b['dur'] for b in recipe]
-        # Contar frecuencias requeridas (ej: {10: 3, 9: 1})
+        # Convertir receta a formato contable: {(dur, cred): count}
         req_counts = {}
-        for r in required_durs: req_counts[r] = req_counts.get(r, 0) + 1
-        
-        # Calcular qué tiene el usuario
+        for item in recipe:
+            key = (item['dur'], item['target'])
+            req_counts[key] = req_counts.get(key, 0) + 1
+            
+        # 2. Calcular qué tiene el usuario (Current)
+        # Necesitamos calcular los créditos de cada solicitud individualmente
         my_reqs = [r for r in current_requests if r['Nombre'] == selected_person]
-        my_durs = [(r['Fin'] - r['Inicio']).days + 1 for r in my_reqs]
-        curr_counts = {}
-        for d in my_durs: curr_counts[d] = curr_counts.get(d, 0) + 1
+        base_sch_temp, _ = generate_base_schedule(year_val)
+        person_row = edited_df[edited_df['Nombre'] == selected_person].iloc[0]
         
-        # Visualizar Contadores
-        cols_puzzle = st.columns(len(req_counts))
-        for idx, (dur, total) in enumerate(req_counts.items()):
-            done = curr_counts.get(dur, 0)
-            # Color
-            border_col = "green" if done >= total else "red"
-            icon = "✅" if done >= total else "⏳"
+        curr_counts = {}
+        for r in my_reqs:
+            dur = (r['Fin'] - r['Inicio']).days + 1
+            s_idx = r['Inicio'].timetuple().tm_yday - 1
+            # Contar creditos de este bloque especifico
+            cred_block = 0
+            for d in range(s_idx, s_idx + dur):
+                if base_sch_temp[person_row['Turno']][d] == 'T': cred_block += 1
+            
+            key = (dur, cred_block)
+            curr_counts[key] = curr_counts.get(key, 0) + 1
+        
+        # 3. Visualizar Contadores
+        # Ordenar claves para que salgan bonitas (10d 4cr, 10d 3cr...)
+        sorted_keys = sorted(req_counts.keys(), key=lambda x: (-x[0], -x[1]))
+        
+        cols_puzzle = st.columns(len(sorted_keys))
+        for idx, k in enumerate(sorted_keys):
+            dur, cred = k
+            total_needed = req_counts[k]
+            have = curr_counts.get(k, 0)
+            
+            icon = "✅" if have >= total_needed else "⏳"
             with cols_puzzle[idx]:
-                st.caption(f"Bloques de {dur} días")
-                st.markdown(f"### {icon} {done}/{total}")
+                st.caption(f"{dur}d ({cred} Cr)")
+                st.markdown(f"### {icon} {have}/{total_needed}")
 
         st.divider()
 
