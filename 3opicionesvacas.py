@@ -17,7 +17,7 @@ TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-# --- ESTRATEGIAS DE VACACIONES (EL MENÚ COMPLETO - 5 OPCIONES) ---
+# --- ESTRATEGIAS DE VACACIONES ---
 STRATEGIES = {
     "standard": {
         "name": "🛡️ Estándar (4 Bloques)",
@@ -139,7 +139,7 @@ def is_in_night_period(day_idx, year, night_periods):
 def get_night_transition_dates(night_periods):
     dates = set()
     for start, end in night_periods:
-        dates.add(end) # Solo el final es crítico
+        dates.add(end) 
     return dates
 
 def calculate_stats(roster_df, requests, year):
@@ -162,34 +162,28 @@ def calculate_stats(roster_df, requests, year):
     return stats
 
 # -------------------------------------------------------------------
-# 2. MOTOR INTELIGENTE (VALIDADOR & GENERADOR)
+# 2. MOTOR INTELIGENTE
 # -------------------------------------------------------------------
 
 def check_global_conflict_generic(start_idx, duration, person, occupation_map, base_sch, year, transition_dates):
-    """Verifica conflictos contra un mapa de ocupación dado."""
     total_days = len(base_sch['A'])
     if start_idx + duration > total_days: return True
 
     for i in range(start_idx, start_idx + duration):
-        # 1. Nocturna (Fin de periodo y trabajo)
         d_obj = datetime.date(year, 1, 1) + timedelta(days=i)
         if d_obj in transition_dates:
             if base_sch[person['Turno']][i] == 'T': return True
         
-        # 2. Ocupación
         occupants = occupation_map.get(i, [])
         if len(occupants) >= 2: return True
         
         for occ in occupants:
-            # 3. Mismo Turno
             if occ['Turno'] == person['Turno']: return True
-            # 4. Misma Categoría
             if person['Rol'] != 'Bombero' and occ['Rol'] == person['Rol']: return True
             
     return False
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
-    """Genera el MENÚ DE OPCIONES DINÁMICO según estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -242,7 +236,6 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
     return options
 
 def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
-    """El Arquitecto Multi-Estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     occupation_map = {} 
@@ -289,10 +282,21 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
     return generated_requests
 
 # -------------------------------------------------------------------
-# 3. VISUALIZADOR HTML
+# 3. VISUALIZADOR HTML (MEJORADO CON LEYENDA)
 # -------------------------------------------------------------------
-def render_annual_calendar(year, team, base_sch, night_periods):
+def render_annual_calendar(year, team, base_sch, night_periods, highlight_turn=False):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
+    
+    # Leyenda
+    if highlight_turn:
+        html += """
+        <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
+            <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Día)</span>
+            <span style='background:#28a745; color:white; padding:2px 5px; border:1px solid #1e7e34;'>T (Noche)</span>
+            <span style='border:2px solid red; padding:0px 5px; color:red;'>Fin Noche (Prohibido)</span>
+        </div>
+        """
+
     html += "<div style='display:flex; margin-bottom:2px;'><div style='width:30px;'></div>"
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
@@ -324,22 +328,8 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL (EXCEL) Y AUXILIARES
+# 4. GENERACIÓN FINAL (EXCEL)
 # -------------------------------------------------------------------
-def get_clustered_dates(available_idxs, needed_count):
-    if not available_idxs: return []
-    groups = []
-    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
-        groups.append(list(map(itemgetter(1), g)))
-    groups.sort(key=len, reverse=True)
-    selected = []
-    for group in groups:
-        if len(selected) < needed_count:
-            take = min(len(group), needed_count - len(selected))
-            selected.extend(group[:take])
-        else: break
-    return sorted(selected)
-
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
@@ -376,6 +366,20 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
             
         if is_compatible: candidates.append(candidate['Nombre'])
     return candidates
+
+def get_clustered_dates(available_idxs, needed_count):
+    if not available_idxs: return []
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    groups.sort(key=len, reverse=True)
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else: break
+    return sorted(selected)
 
 def validate_and_generate_final(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
@@ -430,7 +434,6 @@ def validate_and_generate_final(roster_df, requests, year, night_periods):
                     turn_coverage_counters[name_to_turn[chosen]] += 1
                     person_coverage_counters[chosen] += 1
 
-    # Relleno Administrativo (V(R))
     fill_log = {}
     for name in roster_df['Nombre']:
         current = natural_days_count.get(name, 0)
@@ -511,12 +514,12 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V18.0 - MULTI-ESTRATEGIA)
+# INTERFAZ STREAMLIT (V19.0 - DEFINITIVA)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V18.0")
+st.set_page_config(layout="wide", page_title="Gestor V19.0")
 
-st.title("🚒 Gestor V18.0: El Estratega")
+st.title("🚒 Gestor V19.0: El Híbrido")
 st.caption("Modo Copiloto: Elige estrategia y selecciona las mejores fechas.")
 
 # 1. CONFIGURACIÓN
@@ -551,7 +554,7 @@ with st.sidebar:
                             d2 = pd.to_datetime(v2).date()
                             st.session_state.nights.append((d1, d2)); c+=1
                     except: pass
-                if c>0: st.success(f"Cargadas {c}")
+                if c>0: st.success(f"Añadidos {c} periodos.")
             except: pass
         if st.button("Limpiar Nocturnas"): st.session_state.nights = []
 
@@ -604,12 +607,10 @@ with c_main:
             month_range = st.select_slider("📅 Filtrar Meses:", options=MESES, value=(MESES[0], MESES[-1]))
             st.info(f"🔍 Buscando fichas de tipo: {STRATEGIES[strategy_key]['name']}")
             
-            # OBTENER OPCIONES DINÁMICAS
             options = get_available_blocks_for_person(
                 selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range, strategy_key
             )
             
-            # PESTAÑAS DINÁMICAS
             block_defs = STRATEGIES[strategy_key]['blocks']
             tabs = st.tabs([b['label'] for b in block_defs])
             
@@ -621,7 +622,6 @@ with c_main:
                         st.warning("Sin opciones disponibles.")
                     else:
                         with st.container(height=200):
-                            # CLAVE ÚNICA (FIXED)
                             for opt in available_opts[:20]: 
                                 if st.button(f"➕ {opt['label']}", key=f"add_{selected_person}_{opt['start']}_{i}"):
                                     current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
@@ -642,11 +642,17 @@ with c_main:
                 st.rerun()
 
 with c_vis:
-    st.subheader("3. Visor Global")
-    base_sch, _ = generate_base_schedule(year_val)
-    st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
-    st.markdown(render_annual_calendar(year_val, 'B', base_sch, st.session_state.nights), unsafe_allow_html=True)
-    st.markdown(render_annual_calendar(year_val, 'C', base_sch, st.session_state.nights), unsafe_allow_html=True)
+    # VISOR DINÁMICO
+    if selected_person:
+        p_row = edited_df[edited_df['Nombre'] == selected_person].iloc[0]
+        turn = p_row['Turno']
+        st.subheader(f"3. Visor Turno {turn} ({selected_person})")
+        base_sch, _ = generate_base_schedule(year_val)
+        st.markdown(render_annual_calendar(year_val, turn, base_sch, st.session_state.nights, highlight_turn=True), unsafe_allow_html=True)
+    else:
+        st.subheader("3. Visor Global")
+        base_sch, _ = generate_base_schedule(year_val)
+        st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
 
 # 4. FINAL
 st.divider()
