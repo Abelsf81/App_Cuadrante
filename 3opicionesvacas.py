@@ -90,32 +90,32 @@ STRATEGIES = {
     }
 }
 
-# Plantilla por defecto
+# Plantilla por defecto (TODOS SV FALSE POR DEFECTO)
 DEFAULT_ROSTER = [
     {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Subjefe",    "SV": False},
-    {"ID_Puesto": "Cond A",       "Nombre": "Cond A",       "Turno": "A", "Rol": "Conductor",  "SV": True},
-    {"ID_Puesto": "Bombero A1",   "Nombre": "Bombero A1",   "Turno": "A", "Rol": "Bombero",    "SV": True},
+    {"ID_Puesto": "Cond A",       "Nombre": "Cond A",       "Turno": "A", "Rol": "Conductor",  "SV": False},
+    {"ID_Puesto": "Bombero A1",   "Nombre": "Bombero A1",   "Turno": "A", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero A2",   "Nombre": "Bombero A2",   "Turno": "A", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero A3",   "Nombre": "Bombero A3",   "Turno": "A", "Rol": "Bombero",    "SV": False},
     
     {"ID_Puesto": "Jefe B",       "Nombre": "Jefe B",       "Turno": "B", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe B",    "Nombre": "Subjefe B",    "Turno": "B", "Rol": "Subjefe",    "SV": False},
-    {"ID_Puesto": "Cond B",       "Nombre": "Cond B",       "Turno": "B", "Rol": "Conductor",  "SV": True},
-    {"ID_Puesto": "Bombero B1",   "Nombre": "Bombero B1",   "Turno": "B", "Rol": "Bombero",    "SV": True},
+    {"ID_Puesto": "Cond B",       "Nombre": "Cond B",       "Turno": "B", "Rol": "Conductor",  "SV": False},
+    {"ID_Puesto": "Bombero B1",   "Nombre": "Bombero B1",   "Turno": "B", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero B2",   "Nombre": "Bombero B2",   "Turno": "B", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero B3",   "Nombre": "Bombero B3",   "Turno": "B", "Rol": "Bombero",    "SV": False},
 
     {"ID_Puesto": "Jefe C",       "Nombre": "Jefe C",       "Turno": "C", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe C",    "Nombre": "Subjefe C",    "Turno": "C", "Rol": "Subjefe",    "SV": False},
-    {"ID_Puesto": "Cond C",       "Nombre": "Cond C",       "Turno": "C", "Rol": "Conductor",  "SV": True},
-    {"ID_Puesto": "Bombero C1",   "Nombre": "Bombero C1",   "Turno": "C", "Rol": "Bombero",    "SV": True},
+    {"ID_Puesto": "Cond C",       "Nombre": "Cond C",       "Turno": "C", "Rol": "Conductor",  "SV": False},
+    {"ID_Puesto": "Bombero C1",   "Nombre": "Bombero C1",   "Turno": "C", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero C2",   "Nombre": "Bombero C2",   "Turno": "C", "Rol": "Bombero",    "SV": False},
     {"ID_Puesto": "Bombero C3",   "Nombre": "Bombero C3",   "Turno": "C", "Rol": "Bombero",    "SV": False},
 ]
 
 # -------------------------------------------------------------------
-# 1. UTILIDADES
+# 1. LÓGICA BASE Y UTILIDADES
 # -------------------------------------------------------------------
 
 def get_short_id(name, role, turn):
@@ -133,7 +133,8 @@ def get_short_id(name, role, turn):
 
 def generate_night_template():
     wb = Workbook()
-    ws = wb.active; ws.title = "Plan Nocturnas"
+    ws = wb.active
+    ws.title = "Plan Nocturnas"
     ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
     ws.append(["2026-01-10", "2026-01-12", "Ejemplo (Fin es crítico)"])
     out = io.BytesIO()
@@ -183,6 +184,20 @@ def calculate_stats(roster_df, requests, year):
         stats[name]['natural'] += nat
     return stats
 
+def get_clustered_dates(available_idxs, needed_count):
+    if not available_idxs: return []
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    groups.sort(key=len, reverse=True)
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else: break
+    return sorted(selected)
+
 # -------------------------------------------------------------------
 # 2. MOTOR INTELIGENTE
 # -------------------------------------------------------------------
@@ -206,6 +221,7 @@ def check_global_conflict_generic(start_idx, duration, person, occupation_map, b
     return False
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
+    """Genera el MENÚ DE OPCIONES DINÁMICO según estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -378,20 +394,6 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
         if is_compatible: candidates.append(candidate['Nombre'])
     return candidates
 
-def get_clustered_dates(available_idxs, needed_count):
-    if not available_idxs: return []
-    groups = []
-    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
-        groups.append(list(map(itemgetter(1), g)))
-    groups.sort(key=len, reverse=True)
-    selected = []
-    for group in groups:
-        if len(selected) < needed_count:
-            take = min(len(group), needed_count - len(selected))
-            selected.extend(group[:take])
-        else: break
-    return sorted(selected)
-
 def validate_and_generate_final(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
     final_schedule = {} 
@@ -482,7 +484,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
         
-        # Ordenar por Jerarquía para visualización
+        # ORDENAMIENTO JERÁRQUICO
         members = roster_df[roster_df['Turno'] == t].copy()
         role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
         members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
@@ -508,14 +510,8 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
-                            # Buscar datos de ese nombre para generar ID corto
-                            # Seguridad por si el nombre no existe (caso raro)
-                            cov_rows = roster_df[roster_df['Nombre'] == raw_name]
-                            if not cov_rows.empty:
-                                cov_p = cov_rows.iloc[0]
-                                val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
-                            else:
-                                val = "?"
+                            cov_p = roster_df[roster_df['Nombre'] == raw_name].iloc[0]
+                            val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
                         
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
@@ -542,15 +538,20 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V24.0 - FINAL EDICIÓN AUTOR)
+# INTERFAZ STREAMLIT (V26.0)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V24.0")
+st.set_page_config(layout="wide", page_title="Gestor V26.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO Y AYUDA (LÉEME)", expanded=True):
         st.markdown("""
-        ### 1️⃣ Preparar el Terreno (Menú Izquierda)
+        ### 0️⃣ PASO PREVIO: REVISAR LA PLANTILLA Y SV
+        Antes de nada, abre el desplegable **"Plantilla"** en la barra izquierda.
+        * **¿Quién es SV?** Marca la casilla **SV** (Sustituto de Vehículo) a los bomberos que tienen carnet y autorización para conducir.
+        * *Por qué es importante:* Si un Conductor se va de vacaciones, la App buscará cubrirlo con otro Conductor O con un Bombero que tenga el **SV marcado**. Si no marcas a nadie, el sistema se quedará sin opciones.
+
+        ### 1️⃣ Preparar el Terreno
         1.  **Asegura el Año:** Verifica que pone **2026**.
         2.  **Carga las Nocturnas (VITAL):**
             * Sin esto, el sistema no puede protegerte de doblar turnos en cambios de noche.
@@ -559,29 +560,28 @@ def show_instructions():
         
         ### 2️⃣ Elegir la Estrategia
         En el menú principal, decide cómo se repartirán los días (Menú "Estrategia"):
-        * 🛡️ **Estándar (Recomendada):** 4 periodos (10+10+10+9 días).
-        * 🔢 **Matemática Pura:** 4 periodos (12+12+9+6 días).
-        * ⚖️ **Tridente:** 3 periodos (13+13+13 días).
-        * ✈️ **Larga Estancia:** 3 periodos (15+15+9 días).
-        * 🐜 **Hormiga:** 6 periodos (5 de 6 días + 1 de 9 días).
-        * *Nota: Si cambias de estrategia, se borran los datos.*
+        * **Estándar:** 4 periodos (10+10+10+9 días).
+        * **Matemática Pura:** 4 periodos (12+12+9+6 días).
+        * **Tridente:** 3 periodos (13+13+13 días).
+        * **Larga Estancia:** 3 periodos (15+15+9 días).
+        * **Hormiga:** 6 periodos (5 de 6 días + 1 de 9 días).
 
         ### 3️⃣ Asigna Vacaciones
         * **Botón Automático 🎲:** La IA calcula todo perfecto (13 créditos para todos) en un clic.
-        * **Modo Manual (Copiloto) 👨‍✈️:** * Selecciona a una persona.
+        * **Modo Manual (Copiloto) 👨‍✈️:**
+            * Selecciona a una persona.
             * Mira qué **"Piezas del Puzzle"** le faltan en el panel.
             * Busca fichas válidas en las pestañas de abajo (Oro/Plata/Bronce) y añádelas.
 
         ### 4️⃣ El Semáforo de Conflictos
         * ✅ **Verde:** Todo bien.
         * ⛔ **Rojo:** Error grave (ej: pedir vacaciones el día que sales de noche).
-        * ⚠️ **Naranja:** Aviso (ej: mismo turno, pero distinta categoría).
 
         ### 5️⃣ Generar Excel Final
         Si todo está correcto, pulsa **"🚀 Generar Excel Final"** abajo del todo.
         """)
 
-st.title("🚒 Gestor V24.0: El Tablero de Piezas")
+st.title("🚒 Gestor V26.0: El Tablero de Piezas")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 # MOSTRAR MANUAL
@@ -595,7 +595,21 @@ with st.sidebar:
     with st.expander("Plantilla"):
         if 'roster_data' not in st.session_state:
             st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
-        edited_df = st.data_editor(st.session_state.roster_data, use_container_width=True)
+        
+        # Configuración del editor con CLAVE UNICA para evitar bugs
+        column_cfg = {
+            "ID_Puesto": st.column_config.TextColumn(disabled=True),
+            "Turno": st.column_config.SelectboxColumn(options=TEAMS, required=True),
+            "Rol": st.column_config.SelectboxColumn(options=ROLES, required=True),
+            "SV": st.column_config.CheckboxColumn(label="¿Es SV?", help="Puede cubrir conductor", default=False)
+        }
+        
+        edited_df = st.data_editor(
+            st.session_state.roster_data, 
+            column_config=column_cfg,
+            use_container_width=True,
+            key="roster_editor"
+        )
         st.session_state.roster_data = edited_df
         
     with st.expander("Nocturnas"):
@@ -701,11 +715,9 @@ with c_main:
         for r in my_reqs:
             dur = (r['Fin'] - r['Inicio']).days + 1
             s_idx = r['Inicio'].timetuple().tm_yday - 1
-            # Contar creditos de este bloque especifico
             cred_block = 0
             for d in range(s_idx, s_idx + dur):
                 if base_sch_temp[person_row['Turno']][d] == 'T': cred_block += 1
-            
             key = (dur, cred_block)
             curr_counts[key] = curr_counts.get(key, 0) + 1
         
@@ -782,3 +794,4 @@ if st.button("🚀 Generar Excel Final", type="primary", use_container_width=Tru
     sch, adj, count, fill = validate_and_generate_final(edited_df, current_requests, year_val, st.session_state.nights)
     excel_io = create_final_excel(sch, edited_df, year_val, current_requests, fill, count, st.session_state.nights, adj)
     st.download_button("📥 Descargar Cuadrante", excel_io, f"Cuadrante_Final_{year_val}.xlsx")
+    st.markdown("**Diseñado por Marcos Esteban Vives**")
