@@ -110,7 +110,7 @@ def generate_night_template():
     wb = Workbook()
     ws = wb.active; ws.title = "Plan Nocturnas"
     ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
-    ws.append(["2026-01-10", "2026-01-12", "Ejemplo (Fin es crítico)"])
+    ws.append(["2026-01-10", "2026-01-12", "Ejemplo"])
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
@@ -171,22 +171,30 @@ def get_clustered_dates(available_idxs, needed_count):
     return sorted(selected)
 
 # -------------------------------------------------------------------
-# 2. MOTOR INTELIGENTE
+# 2. MOTOR INTELIGENTE (GENERADOR V32)
 # -------------------------------------------------------------------
 
-def check_global_conflict_generic(start_idx, duration, person, occupation_map, base_sch, year, transition_dates):
+def check_global_conflict_gen(start_idx, duration, person, occupation_map, base_sch, year, transition_dates):
     total_days = len(base_sch['A'])
     if start_idx + duration > total_days: return True
+
     for i in range(start_idx, start_idx + duration):
         d_obj = datetime.date(year, 1, 1) + timedelta(days=i)
         if d_obj in transition_dates:
             if base_sch[person['Turno']][i] == 'T': return True
+        
         occupants = occupation_map.get(i, [])
         if len(occupants) >= 2: return True
+        
         for occ in occupants:
             if occ['Turno'] == person['Turno']: return True
             if person['Rol'] != 'Bombero' and occ['Rol'] == person['Rol']: return True
     return False
+
+def book_slot_gen(start_idx, duration, person, occupation_map):
+    for i in range(start_idx, start_idx + duration):
+        if i not in occupation_map: occupation_map[i] = []
+        occupation_map[i].append(person)
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
     base_sch, total_days = generate_base_schedule(year)
@@ -215,7 +223,7 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
             duration = b_def['dur']
             target_cred = b_def['cred']
             label_key = b_def['label']
-            if not check_global_conflict_generic(d, duration, person, occupation_map, base_sch, year, transition_dates):
+            if not check_global_conflict_gen(d, duration, person, occupation_map, base_sch, year, transition_dates):
                 overlap = False
                 for ms in my_current_slots:
                     if not (d + duration - 1 < ms[0] - 2 or d > ms[1] + 2): overlap = True; break
@@ -244,6 +252,8 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
         my_slots = []
         current_recipe = RECIPE.copy()
         random.shuffle(current_recipe) 
+        credits_got = 0
+        
         for block in current_recipe:
             duration = block['dur']
             target = block['target']
@@ -251,22 +261,41 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
             for d in range(0, total_days - duration):
                 c = sum([1 for k in range(d, d+duration) if base_sch[person['Turno']][k] == 'T'])
                 if c == target:
-                     if not check_global_conflict_generic(d, duration, person, occupation_map, base_sch, year, transition_dates):
+                     if not check_global_conflict_gen(d, duration, person, occupation_map, base_sch, year, transition_dates):
                         options.append(d)
             random.shuffle(options)
             for start in options:
                 overlap = any(start < s[0]+s[1]+2 and start+duration > s[0]-2 for s in my_slots)
                 if not overlap:
-                    for k in range(start, start+duration):
-                        if k not in occupation_map: occupation_map[k] = []
-                        occupation_map[k].append(person)
+                    book_slot_gen(start, duration, person, occupation_map)
                     my_slots.append((start, duration))
+                    credits_got += target
                     generated_requests.append({
                         "Nombre": person['Nombre'],
                         "Inicio": datetime.date(year, 1, 1) + timedelta(days=start),
                         "Fin": datetime.date(year, 1, 1) + timedelta(days=start+duration-1)
                     })
                     break 
+        
+        # RELLENO HIDRÁULICO (SI FALLAN BLOQUES)
+        if credits_got < 13:
+            all_days_random = list(range(total_days))
+            random.shuffle(all_days_random)
+            for d in all_days_random:
+                if credits_got >= 13: break
+                if base_sch[person['Turno']][d] == 'T':
+                    if not check_global_conflict_gen(d, 1, person, occupation_map, base_sch, year, transition_dates):
+                        overlap = any(d < s[0]+s[1]+2 and d > s[0]-2 for s in my_slots)
+                        if not overlap:
+                            book_slot_gen(d, 1, person, occupation_map)
+                            my_slots.append((d, 1))
+                            credits_got += 1
+                            generated_requests.append({
+                                "Nombre": person['Nombre'],
+                                "Inicio": datetime.date(year, 1, 1) + timedelta(days=d),
+                                "Fin": datetime.date(year, 1, 1) + timedelta(days=d)
+                            })
+
     return generated_requests
 
 # -------------------------------------------------------------------
@@ -283,6 +312,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
         m_num = m_idx + 1
         days_in_month = calendar.monthrange(year, m_num)[1]
         html += f"<div style='display:flex; margin-bottom:2px;'><div style='width:30px; font-weight:bold;'>{mes}</div>"
+        
         for d in range(1, 32):
             if d <= days_in_month:
                 dt = datetime.date(year, m_num, d)
@@ -302,7 +332,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL, COBERTURA Y ECUALIZADOR
+# 4. GENERACIÓN FINAL Y COBERTURAS (CON NIVELADOR)
 # -------------------------------------------------------------------
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
@@ -343,6 +373,13 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
     turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
     person_coverage_counters = {name: 0 for name in roster_df['Nombre']}
     name_to_turn = {row['Nombre']: row['Turno'] for _, row in roster_df.iterrows()}
+    
+    # Cálculo previo de carga de trabajo base (NIVELADOR)
+    # Días base del turno - 13 de vacaciones (constante)
+    base_work_load = {}
+    for _, row in roster_df.iterrows():
+        base_t_count = base_schedule_turn[row['Turno']].count('T')
+        base_work_load[row['Nombre']] = base_t_count - 13
     
     for _, row in roster_df.iterrows():
         final_schedule[row['Nombre']] = base_schedule_turn[row['Turno']].copy()
@@ -391,7 +428,12 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
                         prev2 = final_schedule[c][d-2] if d>1 else 'L'
                         if not (prev.startswith('T') and prev2.startswith('T')): valid.append(c)
                     if valid:
-                        valid.sort(key=lambda x: (turn_coverage_counters[name_to_turn[x]], person_coverage_counters[x], random.random()))
+                        # SORTING CLAVE: NIVELADOR AUTOMÁTICO
+                        # Prioriza al que tenga MENOS carga total proyectada (Base + Coberturas Actuales)
+                        valid.sort(key=lambda x: (
+                            base_work_load[x] + person_coverage_counters[x], # Criterio 1: Menos días totales
+                            random.random()
+                        ))
                         chosen = valid[0]
 
             if chosen:
@@ -536,10 +578,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V31.0 - FINAL CON MERCADO DE FICHAJES)
+# INTERFAZ STREAMLIT (V34.0 - FINAL + NIVELADOR HIDRÁULICO)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V31.0")
+st.set_page_config(layout="wide", page_title="Gestor V34.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
@@ -553,13 +595,12 @@ def show_instructions():
         ### 2️⃣ ASIGNA VACACIONES
         * Elige estrategia y usa el modo **Automático** o **Manual**.
         
-        ### 3️⃣ EL ECUALIZADOR (NUEVO)
+        ### 3️⃣ EL ECUALIZADOR
         * Antes de descargar, mira el panel **"Mercado de Intercambios"**.
         * La App te sugerirá cambios automáticos para equilibrar los días trabajados (121-123).
-        * Pulsa **"🔀 Ejecutar"** y la App recalculará todo al instante.
         """)
 
-st.title("🚒 Gestor V31.0: El Mercado de Fichajes")
+st.title("🚒 Gestor V34.0: El Mercado de Fichajes")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 show_instructions()
 
