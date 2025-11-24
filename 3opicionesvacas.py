@@ -17,54 +17,76 @@ TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-# --- ESTRATEGIAS DE VACACIONES ---
+# --- ESTRATEGIAS DE VACACIONES (INCLUIDO TRIDENTE) ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (4 Bloques)",
-        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
+        "name": "Estandar (4 Bloques)",
+        "desc": "10 + 10 + 10 + 9 dias. Requiere iniciar uno en dia de Guardia.",
         "blocks": [
-            {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
-            {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
-            {"dur": 9,  "cred": 3, "label": "Bloque 9d (3 Cr)"}
+            {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Creditos)"},
+            {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Creditos)"},
+            {"dur": 9,  "cred": 3, "label": "Bloque 9d (3 Creditos)"}
         ],
-        "auto_recipe": [ {"dur": 10, "target": 4}, {"dur": 10, "target": 3}, {"dur": 10, "target": 3}, {"dur": 9, "target": 3} ]
-    },
-    "safe": {
-        "name": "🔢 Matemática Pura (4 Bloques)",
-        "desc": "12+12+9+6 días. Indestructible.",
-        "blocks": [
-            {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
-            {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
-            {"dur": 6,  "cred": 2, "label": "Corto 6d (2 Cr)"}
-        ],
-        "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
+        "auto_recipe": [ 
+            {"dur": 10, "target": 4}, 
+            {"dur": 10, "target": 3}, 
+            {"dur": 10, "target": 3}, 
+            {"dur": 9, "target": 3}
+        ]
     },
     "balanced": {
-        "name": "⚖️ Tridente (3 Bloques)",
-        "desc": "13+13+13 días.",
+        "name": "Tridente (3 Bloques)",
+        "desc": "13 + 13 + 13 dias. Reparto equitativo.",
         "blocks": [
-            {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
-            {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
+            {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Creditos)"},
+            {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Creditos)"}
         ],
-        "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
+        "auto_recipe": [
+            {"dur": 13, "target": 5}, 
+            {"dur": 13, "target": 4}, 
+            {"dur": 13, "target": 4}
+        ]
+    },
+    "safe": {
+        "name": "Matematica Pura (4 Bloques)",
+        "desc": "12 + 12 + 9 + 6 dias. Indestructible, siempre cuadra.",
+        "blocks": [
+            {"dur": 12, "cred": 4, "label": "Largo 12d (4 Creditos)"},
+            {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Creditos)"},
+            {"dur": 6,  "cred": 2, "label": "Corto 6d (2 Creditos)"}
+        ],
+        "auto_recipe": [
+            {"dur": 12, "target": 4}, 
+            {"dur": 12, "target": 4}, 
+            {"dur": 9, "target": 3},
+            {"dur": 6, "target": 2}
+        ]
     },
     "long": {
-        "name": "✈️ Larga Estancia (3 Bloques)",
-        "desc": "15+15+9 días.",
+        "name": "Larga Estancia (3 Bloques)",
+        "desc": "15 + 15 + 9 dias. Ideal viajes largos.",
         "blocks": [
-            {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
-            {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
+            {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Creditos)"},
+            {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Creditos)"}
         ],
-        "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
+        "auto_recipe": [
+            {"dur": 15, "target": 5}, 
+            {"dur": 15, "target": 5}, 
+            {"dur": 9, "target": 3}
+        ]
     },
     "micro": {
-        "name": "🐜 Hormiga (6 Bloques)",
-        "desc": "5x6 días + 1x9 días.",
+        "name": "Hormiga (6 Bloques)",
+        "desc": "5 periodos de 6 dias + 1 de 9 dias.",
         "blocks": [
-            {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
-            {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
+            {"dur": 6, "cred": 2, "label": "Semana 6d (2 Creditos)"},
+            {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Creditos)"}
         ],
-        "auto_recipe": [ {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 9, "target": 3} ]
+        "auto_recipe": [
+            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
+            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
+            {"dur": 6, "target": 2}, {"dur": 9, "target": 3}
+        ]
     }
 }
 
@@ -93,8 +115,32 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. LÓGICA BASE
+# 1. LÓGICA BASE Y UTILIDADES
 # -------------------------------------------------------------------
+
+def get_short_id(name, role, turn):
+    if role == "Jefe": return f"J{turn}"
+    if role == "Subjefe": return f"S{turn}"
+    if role == "Conductor": return f"C{turn}"
+    if "Bombero" in name:
+        parts = name.split()
+        if len(parts) > 1:
+            suffix = parts[-1]
+            if len(suffix) >= 2:
+                num = suffix[-1]
+                return f"B{num}{turn}"
+    return f"{name[:3]}{turn}"
+
+def generate_night_template():
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Plan Nocturnas"
+    ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
+    ws.append(["2026-01-10", "2026-01-12", "Ejemplo"])
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    return out
 
 def generate_base_schedule(year):
     is_leap = calendar.isleap(year)
@@ -120,27 +166,6 @@ def get_night_transition_dates(night_periods):
         dates.add(end) 
     return dates
 
-def get_short_id(name, role, turn):
-    if role == "Jefe": return f"J{turn}"
-    if role == "Subjefe": return f"S{turn}"
-    if role == "Conductor": return f"C{turn}"
-    if "Bombero" in name:
-        parts = name.split()
-        if len(parts) > 1:
-            suffix = parts[-1]
-            if len(suffix) >= 2:
-                num = suffix[-1]
-                return f"B{num}{turn}"
-    return f"{name[:3]}{turn}"
-
-def generate_night_template():
-    wb = Workbook()
-    ws = wb.active; ws.title = "Plan Nocturnas"
-    ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
-    ws.append(["2026-01-10", "2026-01-12", "Ejemplo"])
-    out = io.BytesIO(); wb.save(out); out.seek(0)
-    return out
-
 def calculate_stats(roster_df, requests, year):
     base_sch, _ = generate_base_schedule(year)
     stats = {}
@@ -159,6 +184,20 @@ def calculate_stats(roster_df, requests, year):
         stats[name]['credits'] += cred
         stats[name]['natural'] += nat
     return stats
+
+def get_clustered_dates(available_idxs, needed_count):
+    if not available_idxs: return []
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    groups.sort(key=len, reverse=True)
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else: break
+    return sorted(selected)
 
 # -------------------------------------------------------------------
 # 2. MOTOR INTELIGENTE
@@ -316,7 +355,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL (EXCEL)
+# 4. GENERACIÓN FINAL Y COBERTURAS
 # -------------------------------------------------------------------
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
@@ -354,20 +393,6 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
             
         if is_compatible: candidates.append(candidate['Nombre'])
     return candidates
-
-def get_clustered_dates(available_idxs, needed_count):
-    if not available_idxs: return []
-    groups = []
-    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
-        groups.append(list(map(itemgetter(1), g)))
-    groups.sort(key=len, reverse=True)
-    selected = []
-    for group in groups:
-        if len(selected) < needed_count:
-            take = min(len(group), needed_count - len(selected))
-            selected.extend(group[:take])
-        else: break
-    return sorted(selected)
 
 def validate_and_generate_final(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
@@ -459,6 +484,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
         
+        # Ordenar por Jerarquía para visualización
         members = roster_df[roster_df['Turno'] == t].copy()
         role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
         members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
@@ -512,18 +538,49 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V20.0 - FINAL CON RESET)
+# INTERFAZ STREAMLIT (V21.0 - FINAL)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V20.0")
+st.set_page_config(layout="wide", page_title="Gestor V21.0")
 
-st.title("🚒 Gestor V20.0: El Híbrido")
-st.caption("Modo Copiloto: Elige estrategia y selecciona las mejores fechas.")
+def show_instructions():
+    with st.expander("📘 INSTRUCCIONES DE USO (LÉEME ANTES DE EMPEZAR)", expanded=True):
+        st.markdown("""
+        ### 1️⃣ Configuración Inicial (Barra Izquierda)
+        1.  **Revisa el Año:** Asegúrate de que es 2026.
+        2.  **Carga las Nocturnas:**
+            * Descarga la plantilla vacía.
+            * Rellena las fechas de inicio y fin en Excel.
+            * Sube el archivo. (Esto es vital para bloquear días prohibidos).
+
+        ### 2️⃣ Elige tu Estrategia
+        En el menú principal, selecciona cómo quieres repartir las vacaciones:
+        * 🛡️ **Estándar:** 4 periodos (10+10+10+9 días).
+        * ⚖️ **Tridente:** 3 periodos iguales de 13 días.
+        * ✈️ **Larga Estancia:** Viajes largos de 15 días.
+        * 🔢 **Matemática Pura:** Bloques de 12, 9 y 6 días.
+
+        ### 3️⃣ Asigna Vacaciones
+        * 🎲 **Automático:** Pulsa el botón y la IA hará todo el trabajo.
+        * 👨‍✈️ **Manual (Copiloto):** Selecciona un trabajador y elige fichas del menú.
+            * *Nota:* Si cambias de estrategia a mitad, se borrarán las selecciones para evitar errores.
+
+        ### 4️⃣ Generar y Descargar
+        Si todo está en verde (sin conflictos), pulsa **"🚀 Generar Excel Final"** abajo del todo.
+        """)
+
+st.title("🚒 Gestor V21.0: El Híbrido")
+
+# MOSTRAR INSTRUCCIONES
+show_instructions()
 
 # 1. CONFIGURACIÓN
 with st.sidebar:
     st.header("1. Configuración")
     year_val = st.number_input("Año", value=2026)
+    
+    with st.expander("Ayuda / Instrucciones"):
+        st.info("Consulta aquí los pasos básicos si te pierdes.")
     
     with st.expander("Plantilla"):
         if 'roster_data' not in st.session_state:
@@ -567,11 +624,9 @@ with st.sidebar:
     # --- SELECTOR DE ESTRATEGIA CON RESET ---
     st.divider()
     
-    # Función de callback para el cambio de estrategia
     def on_strategy_change():
-        # Borrar datos al cambiar
         st.session_state.raw_requests_df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
-        st.toast("⚠️ Estrategia cambiada: Se han borrado las selecciones anteriores para evitar mezclas.", icon="🗑️")
+        st.toast("⚠️ Estrategia cambiada: Se han borrado las selecciones anteriores.", icon="🗑️")
 
     strategy_key = st.selectbox(
         "🎯 Estrategia de Vacaciones", 
