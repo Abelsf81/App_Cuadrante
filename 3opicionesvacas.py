@@ -20,8 +20,8 @@ MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "
 # --- ESTRATEGIAS DE VACACIONES ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (Recomendada)",
-        "desc": "3 periodos de 10 días + 1 de 9 días. (Matemática: 4+3+3+3 créditos).",
+        "name": "🛡️ Estándar (4 Bloques)",
+        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
             {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
@@ -35,8 +35,8 @@ STRATEGIES = {
         ]
     },
     "safe": {
-        "name": "🔢 Matemática Pura (Indestructible)",
-        "desc": "12 + 12 + 9 + 6 días. Al ser múltiplos de 3, siempre cuadran los créditos.",
+        "name": "🔢 Matemática Pura (4 Bloques)",
+        "desc": "12+12+9+6 días. Indestructible.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
@@ -51,7 +51,7 @@ STRATEGIES = {
     },
     "balanced": {
         "name": "⚖️ Tridente (3 Bloques)",
-        "desc": "13 + 13 + 13 días. Reparto equitativo del año.",
+        "desc": "13+13+13 días.",
         "blocks": [
             {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
             {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
@@ -63,8 +63,8 @@ STRATEGIES = {
         ]
     },
     "long": {
-        "name": "✈️ Larga Estancia (Viajeros)",
-        "desc": "15 + 15 + 9 días. Ideal para viajes largos.",
+        "name": "✈️ Larga Estancia (3 Bloques)",
+        "desc": "15+15+9 días.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
@@ -76,8 +76,8 @@ STRATEGIES = {
         ]
     },
     "micro": {
-        "name": "🐜 Hormiga (Micro-Cortes)",
-        "desc": "5 periodos de 6 días + 1 de 9 días.",
+        "name": "🐜 Hormiga (6 Bloques)",
+        "desc": "5x6 días + 1x9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
             {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
@@ -115,7 +115,7 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. LÓGICA BASE Y UTILIDADES
+# 1. UTILIDADES
 # -------------------------------------------------------------------
 
 def get_short_id(name, role, turn):
@@ -182,20 +182,6 @@ def calculate_stats(roster_df, requests, year):
         stats[name]['credits'] += cred
         stats[name]['natural'] += nat
     return stats
-
-def get_clustered_dates(available_idxs, needed_count):
-    if not available_idxs: return []
-    groups = []
-    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
-        groups.append(list(map(itemgetter(1), g)))
-    groups.sort(key=len, reverse=True)
-    selected = []
-    for group in groups:
-        if len(selected) < needed_count:
-            take = min(len(group), needed_count - len(selected))
-            selected.extend(group[:take])
-        else: break
-    return sorted(selected)
 
 # -------------------------------------------------------------------
 # 2. MOTOR INTELIGENTE
@@ -392,6 +378,20 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
         if is_compatible: candidates.append(candidate['Nombre'])
     return candidates
 
+def get_clustered_dates(available_idxs, needed_count):
+    if not available_idxs: return []
+    groups = []
+    for k, g in groupby(enumerate(available_idxs), lambda ix: ix[0] - ix[1]):
+        groups.append(list(map(itemgetter(1), g)))
+    groups.sort(key=len, reverse=True)
+    selected = []
+    for group in groups:
+        if len(selected) < needed_count:
+            take = min(len(group), needed_count - len(selected))
+            selected.extend(group[:take])
+        else: break
+    return sorted(selected)
+
 def validate_and_generate_final(roster_df, requests, year, night_periods):
     base_schedule_turn, total_days = generate_base_schedule(year)
     final_schedule = {} 
@@ -482,6 +482,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
         
+        # Ordenar por Jerarquía para visualización
         members = roster_df[roster_df['Turno'] == t].copy()
         role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
         members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
@@ -507,8 +508,14 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
-                            cov_p = roster_df[roster_df['Nombre'] == raw_name].iloc[0]
-                            val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
+                            # Buscar datos de ese nombre para generar ID corto
+                            # Seguridad por si el nombre no existe (caso raro)
+                            cov_rows = roster_df[roster_df['Nombre'] == raw_name]
+                            if not cov_rows.empty:
+                                cov_p = cov_rows.iloc[0]
+                                val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
+                            else:
+                                val = "?"
                         
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
@@ -535,10 +542,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V23.1 - FINAL)
+# INTERFAZ STREAMLIT (V24.0 - FINAL EDICIÓN AUTOR)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V23.1")
+st.set_page_config(layout="wide", page_title="Gestor V24.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO Y AYUDA (LÉEME)", expanded=True):
@@ -552,12 +559,14 @@ def show_instructions():
         
         ### 2️⃣ Elegir la Estrategia
         En el menú principal, decide cómo se repartirán los días (Menú "Estrategia"):
-        * **Estándar:** 4 periodos (10+10+10+9 días).
-        * **Matemática Pura:** 4 periodos (12+12+9+6 días).
-        * **Tridente:** 3 periodos (13+13+13 días).
+        * 🛡️ **Estándar (Recomendada):** 4 periodos (10+10+10+9 días).
+        * 🔢 **Matemática Pura:** 4 periodos (12+12+9+6 días).
+        * ⚖️ **Tridente:** 3 periodos (13+13+13 días).
+        * ✈️ **Larga Estancia:** 3 periodos (15+15+9 días).
+        * 🐜 **Hormiga:** 6 periodos (5 de 6 días + 1 de 9 días).
         * *Nota: Si cambias de estrategia, se borran los datos.*
 
-        ### 3️⃣ Asignar Vacaciones
+        ### 3️⃣ Asigna Vacaciones
         * **Botón Automático 🎲:** La IA calcula todo perfecto (13 créditos para todos) en un clic.
         * **Modo Manual (Copiloto) 👨‍✈️:** * Selecciona a una persona.
             * Mira qué **"Piezas del Puzzle"** le faltan en el panel.
@@ -572,7 +581,8 @@ def show_instructions():
         Si todo está correcto, pulsa **"🚀 Generar Excel Final"** abajo del todo.
         """)
 
-st.title("🚒 Gestor V23.1: El Tablero de Piezas")
+st.title("🚒 Gestor V24.0: El Tablero de Piezas")
+st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 # MOSTRAR MANUAL
 show_instructions()
@@ -691,9 +701,11 @@ with c_main:
         for r in my_reqs:
             dur = (r['Fin'] - r['Inicio']).days + 1
             s_idx = r['Inicio'].timetuple().tm_yday - 1
+            # Contar creditos de este bloque especifico
             cred_block = 0
             for d in range(s_idx, s_idx + dur):
                 if base_sch_temp[person_row['Turno']][d] == 'T': cred_block += 1
+            
             key = (dur, cred_block)
             curr_counts[key] = curr_counts.get(key, 0) + 1
         
