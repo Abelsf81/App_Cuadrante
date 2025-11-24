@@ -20,8 +20,8 @@ MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "
 # --- ESTRATEGIAS DE VACACIONES ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (4 Bloques)",
-        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
+        "name": "🛡️ Estándar (Recomendada)",
+        "desc": "3 periodos de 10 días + 1 de 9 días. (Matemática: 4+3+3+3 créditos).",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
             {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
@@ -35,8 +35,8 @@ STRATEGIES = {
         ]
     },
     "safe": {
-        "name": "🔢 Matemática Pura (4 Bloques)",
-        "desc": "12+12+9+6 días. Indestructible.",
+        "name": "🔢 Matemática Pura (Indestructible)",
+        "desc": "12 + 12 + 9 + 6 días. Al ser múltiplos de 3, siempre cuadran los créditos.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
@@ -51,7 +51,7 @@ STRATEGIES = {
     },
     "balanced": {
         "name": "⚖️ Tridente (3 Bloques)",
-        "desc": "13+13+13 días.",
+        "desc": "13 + 13 + 13 días. Reparto equitativo del año.",
         "blocks": [
             {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
             {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
@@ -63,8 +63,8 @@ STRATEGIES = {
         ]
     },
     "long": {
-        "name": "✈️ Larga Estancia (3 Bloques)",
-        "desc": "15+15+9 días.",
+        "name": "✈️ Larga Estancia (Viajeros)",
+        "desc": "15 + 15 + 9 días. Ideal para viajes largos.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
@@ -76,8 +76,8 @@ STRATEGIES = {
         ]
     },
     "micro": {
-        "name": "🐜 Hormiga (6 Bloques)",
-        "desc": "5x6 días + 1x9 días.",
+        "name": "🐜 Hormiga (Micro-Cortes)",
+        "desc": "5 periodos de 6 días + 1 de 9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
             {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
@@ -133,13 +133,11 @@ def get_short_id(name, role, turn):
 
 def generate_night_template():
     wb = Workbook()
-    ws = wb.active
-    ws.title = "Plan Nocturnas"
+    ws = wb.active; ws.title = "Plan Nocturnas"
     ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
-    ws.append(["2026-01-10", "2026-01-12", "Ejemplo"])
+    ws.append(["2026-01-10", "2026-01-12", "Ejemplo (Fin es crítico)"])
     out = io.BytesIO()
-    wb.save(out)
-    out.seek(0)
+    wb.save(out); out.seek(0)
     return out
 
 def generate_base_schedule(year):
@@ -222,7 +220,6 @@ def check_global_conflict_generic(start_idx, duration, person, occupation_map, b
     return False
 
 def get_available_blocks_for_person(person_name, roster_df, current_requests, year, night_periods, month_range, strategy_key):
-    """Genera el MENÚ DE OPCIONES DINÁMICO según estrategia."""
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
@@ -538,25 +535,47 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V23.0 - PANEL DE PIEZAS DETALLADO)
+# INTERFAZ STREAMLIT (V23.1 - FINAL)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V23.0")
+st.set_page_config(layout="wide", page_title="Gestor V23.1")
 
 def show_instructions():
-    with st.expander("📘 GUÍA: Cómo completar tu puzzle de vacaciones", expanded=True):
+    with st.expander("📘 MANUAL DE USUARIO Y AYUDA (LÉEME)", expanded=True):
         st.markdown("""
-        **Objetivo:** Conseguir las piezas exactas que pide tu estrategia.
+        ### 1️⃣ Preparar el Terreno (Menú Izquierda)
+        1.  **Asegura el Año:** Verifica que pone **2026**.
+        2.  **Carga las Nocturnas (VITAL):**
+            * Sin esto, el sistema no puede protegerte de doblar turnos en cambios de noche.
+            * Pulsa **"⬇️ Descargar Plantilla Nocturnas"**.
+            * Rellena el Excel y súbelo en el botón correspondiente.
         
-        1.  **Elige Estrategia:** (Abajo a la izquierda).
-        2.  **Selecciona tu nombre:** Verás qué piezas te faltan.
-        3.  **Completa los huecos:**
-            * Busca en las pestañas (Oro/Plata/Bronce).
-            * Fíjate que hay fichas de **4 Créditos** y de **3 Créditos**.
-            * Debes coger exactamente lo que te pide el contador (ej: 1 de 4Cr y 2 de 3Cr).
+        ### 2️⃣ Elegir la Estrategia
+        En el menú principal, decide cómo se repartirán los días (Menú "Estrategia"):
+        * **Estándar:** 4 periodos (10+10+10+9 días).
+        * **Matemática Pura:** 4 periodos (12+12+9+6 días).
+        * **Tridente:** 3 periodos (13+13+13 días).
+        * *Nota: Si cambias de estrategia, se borran los datos.*
+
+        ### 3️⃣ Asignar Vacaciones
+        * **Botón Automático 🎲:** La IA calcula todo perfecto (13 créditos para todos) en un clic.
+        * **Modo Manual (Copiloto) 👨‍✈️:** * Selecciona a una persona.
+            * Mira qué **"Piezas del Puzzle"** le faltan en el panel.
+            * Busca fichas válidas en las pestañas de abajo (Oro/Plata/Bronce) y añádelas.
+
+        ### 4️⃣ El Semáforo de Conflictos
+        * ✅ **Verde:** Todo bien.
+        * ⛔ **Rojo:** Error grave (ej: pedir vacaciones el día que sales de noche).
+        * ⚠️ **Naranja:** Aviso (ej: mismo turno, pero distinta categoría).
+
+        ### 5️⃣ Generar Excel Final
+        Si todo está correcto, pulsa **"🚀 Generar Excel Final"** abajo del todo.
         """)
 
-st.title("🚒 Gestor V23.0: El Tablero de Piezas")
+st.title("🚒 Gestor V23.1: El Tablero de Piezas")
+
+# MOSTRAR MANUAL
+show_instructions()
 
 # 1. CONFIGURACIÓN
 with st.sidebar:
@@ -633,9 +652,6 @@ if 'raw_requests_df' not in st.session_state:
 current_requests = st.session_state.raw_requests_df.to_dict('records')
 stats = calculate_stats(edited_df, current_requests, year_val)
 
-# MOSTRAR INSTRUCCIONES
-show_instructions()
-
 # 3. DRAFT ROOM (COPILOTO)
 st.divider()
 c_main, c_vis = st.columns([1, 2])
@@ -661,14 +677,12 @@ with c_main:
         
         # 1. Calcular qué pide la receta (Required)
         recipe = STRATEGIES[strategy_key]['auto_recipe']
-        # Convertir receta a formato contable: {(dur, cred): count}
         req_counts = {}
         for item in recipe:
             key = (item['dur'], item['target'])
             req_counts[key] = req_counts.get(key, 0) + 1
             
         # 2. Calcular qué tiene el usuario (Current)
-        # Necesitamos calcular los créditos de cada solicitud individualmente
         my_reqs = [r for r in current_requests if r['Nombre'] == selected_person]
         base_sch_temp, _ = generate_base_schedule(year_val)
         person_row = edited_df[edited_df['Nombre'] == selected_person].iloc[0]
@@ -677,16 +691,13 @@ with c_main:
         for r in my_reqs:
             dur = (r['Fin'] - r['Inicio']).days + 1
             s_idx = r['Inicio'].timetuple().tm_yday - 1
-            # Contar creditos de este bloque especifico
             cred_block = 0
             for d in range(s_idx, s_idx + dur):
                 if base_sch_temp[person_row['Turno']][d] == 'T': cred_block += 1
-            
             key = (dur, cred_block)
             curr_counts[key] = curr_counts.get(key, 0) + 1
         
         # 3. Visualizar Contadores
-        # Ordenar claves para que salgan bonitas (10d 4cr, 10d 3cr...)
         sorted_keys = sorted(req_counts.keys(), key=lambda x: (-x[0], -x[1]))
         
         cols_puzzle = st.columns(len(sorted_keys))
