@@ -17,15 +17,15 @@ TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-# --- ESTRATEGIAS DE VACACIONES (INCLUIDO TRIDENTE) ---
+# --- ESTRATEGIAS DE VACACIONES ---
 STRATEGIES = {
     "standard": {
-        "name": "Estandar (4 Bloques)",
-        "desc": "10 + 10 + 10 + 9 dias. Requiere iniciar uno en dia de Guardia.",
+        "name": "🛡️ Estándar (4 Bloques)",
+        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
         "blocks": [
-            {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Creditos)"},
-            {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Creditos)"},
-            {"dur": 9,  "cred": 3, "label": "Bloque 9d (3 Creditos)"}
+            {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
+            {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Bloque 9d (3 Cr)"}
         ],
         "auto_recipe": [ 
             {"dur": 10, "target": 4}, 
@@ -34,26 +34,13 @@ STRATEGIES = {
             {"dur": 9, "target": 3}
         ]
     },
-    "balanced": {
-        "name": "Tridente (3 Bloques)",
-        "desc": "13 + 13 + 13 dias. Reparto equitativo.",
-        "blocks": [
-            {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Creditos)"},
-            {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Creditos)"}
-        ],
-        "auto_recipe": [
-            {"dur": 13, "target": 5}, 
-            {"dur": 13, "target": 4}, 
-            {"dur": 13, "target": 4}
-        ]
-    },
     "safe": {
-        "name": "Matematica Pura (4 Bloques)",
-        "desc": "12 + 12 + 9 + 6 dias. Indestructible, siempre cuadra.",
+        "name": "🔢 Matemática Pura (4 Bloques)",
+        "desc": "12+12+9+6 días. Indestructible.",
         "blocks": [
-            {"dur": 12, "cred": 4, "label": "Largo 12d (4 Creditos)"},
-            {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Creditos)"},
-            {"dur": 6,  "cred": 2, "label": "Corto 6d (2 Creditos)"}
+            {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
+            {"dur": 6,  "cred": 2, "label": "Corto 6d (2 Cr)"}
         ],
         "auto_recipe": [
             {"dur": 12, "target": 4}, 
@@ -62,12 +49,25 @@ STRATEGIES = {
             {"dur": 6, "target": 2}
         ]
     },
-    "long": {
-        "name": "Larga Estancia (3 Bloques)",
-        "desc": "15 + 15 + 9 dias. Ideal viajes largos.",
+    "balanced": {
+        "name": "⚖️ Tridente (3 Bloques)",
+        "desc": "13+13+13 días.",
         "blocks": [
-            {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Creditos)"},
-            {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Creditos)"}
+            {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
+            {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
+        ],
+        "auto_recipe": [
+            {"dur": 13, "target": 5}, 
+            {"dur": 13, "target": 4}, 
+            {"dur": 13, "target": 4}
+        ]
+    },
+    "long": {
+        "name": "✈️ Larga Estancia (3 Bloques)",
+        "desc": "15+15+9 días.",
+        "blocks": [
+            {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
+            {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
         ],
         "auto_recipe": [
             {"dur": 15, "target": 5}, 
@@ -76,11 +76,11 @@ STRATEGIES = {
         ]
     },
     "micro": {
-        "name": "Hormiga (6 Bloques)",
-        "desc": "5 periodos de 6 dias + 1 de 9 dias.",
+        "name": "🐜 Hormiga (6 Bloques)",
+        "desc": "5x6 días + 1x9 días.",
         "blocks": [
-            {"dur": 6, "cred": 2, "label": "Semana 6d (2 Creditos)"},
-            {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Creditos)"}
+            {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
+            {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
         ],
         "auto_recipe": [
             {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
@@ -355,7 +355,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     return html
 
 # -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL Y COBERTURAS
+# 4. GENERACIÓN FINAL Y AUXILIARES
 # -------------------------------------------------------------------
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
@@ -484,7 +484,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
         cell_title = ws1.cell(curr_row, 1, f"TURNO {t}"); cell_title.font = Font(bold=True, color="FFFFFF"); cell_title.fill = PatternFill("solid", fgColor="000080"); cell_title.alignment = align_c
         curr_row += 2
         
-        # Ordenar por Jerarquía para visualización
         members = roster_df[roster_df['Turno'] == t].copy()
         role_order = ["Jefe", "Subjefe", "Conductor", "Bombero"]
         members['sort_key'] = members['Rol'].apply(lambda x: role_order.index(x))
@@ -538,49 +537,36 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V21.0 - FINAL)
+# INTERFAZ STREAMLIT (V22.0 - DASHBOARD FINAL)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V21.0")
+st.set_page_config(layout="wide", page_title="Gestor V22.0")
 
 def show_instructions():
-    with st.expander("📘 INSTRUCCIONES DE USO (LÉEME ANTES DE EMPEZAR)", expanded=True):
+    with st.expander("📘 GUÍA RÁPIDA: Cómo usar el Tablero de Control", expanded=True):
         st.markdown("""
-        ### 1️⃣ Configuración Inicial (Barra Izquierda)
-        1.  **Revisa el Año:** Asegúrate de que es 2026.
-        2.  **Carga las Nocturnas:**
-            * Descarga la plantilla vacía.
-            * Rellena las fechas de inicio y fin en Excel.
-            * Sube el archivo. (Esto es vital para bloquear días prohibidos).
-
-        ### 2️⃣ Elige tu Estrategia
-        En el menú principal, selecciona cómo quieres repartir las vacaciones:
-        * 🛡️ **Estándar:** 4 periodos (10+10+10+9 días).
-        * ⚖️ **Tridente:** 3 periodos iguales de 13 días.
-        * ✈️ **Larga Estancia:** Viajes largos de 15 días.
-        * 🔢 **Matemática Pura:** Bloques de 12, 9 y 6 días.
-
-        ### 3️⃣ Asigna Vacaciones
-        * 🎲 **Automático:** Pulsa el botón y la IA hará todo el trabajo.
-        * 👨‍✈️ **Manual (Copiloto):** Selecciona un trabajador y elige fichas del menú.
-            * *Nota:* Si cambias de estrategia a mitad, se borrarán las selecciones para evitar errores.
-
-        ### 4️⃣ Generar y Descargar
-        Si todo está en verde (sin conflictos), pulsa **"🚀 Generar Excel Final"** abajo del todo.
+        ### 1. Elige tu Estrategia
+        En el menú de abajo, selecciona cómo quieres repartir tus días (Estándar, Matemática Pura, etc.).
+        
+        ### 2. Sigue los Indicadores
+        Al seleccionar un trabajador, verás dos tipos de contadores:
+        * 📊 **Créditos Totales:** Debes llegar a **13/13**.
+        * 🧩 **Piezas del Puzzle:** Debes completar los bloques que pide la estrategia (ej: 2 de 12 días).
+        
+        ### 3. Rellena los Huecos
+        * Si te faltan piezas, búscalas en las pestañas de abajo (Oro, Plata, Bronce) y añádelas.
+        * La App solo te mostrará fechas que **NO chocan** con tus compañeros.
+        
+        ### 4. ¿Atascado?
+        Usa el botón **"🎲 Generar Automático"** para que la IA haga un reparto perfecto y luego tú modificas lo que quieras.
         """)
 
-st.title("🚒 Gestor V21.0: El Híbrido")
-
-# MOSTRAR INSTRUCCIONES
-show_instructions()
+st.title("🚒 Gestor V22.0: Tablero de Control")
 
 # 1. CONFIGURACIÓN
 with st.sidebar:
-    st.header("1. Configuración")
+    st.header("Configuración")
     year_val = st.number_input("Año", value=2026)
-    
-    with st.expander("Ayuda / Instrucciones"):
-        st.info("Consulta aquí los pasos básicos si te pierdes.")
     
     with st.expander("Plantilla"):
         if 'roster_data' not in st.session_state:
@@ -634,7 +620,9 @@ with st.sidebar:
         format_func=lambda x: STRATEGIES[x]['name'],
         on_change=on_strategy_change
     )
-    st.info(STRATEGIES[strategy_key]['desc'])
+    # Mostrar descripción visual
+    strat_desc = STRATEGIES[strategy_key]['desc']
+    st.info(f"{strat_desc}")
 
     # BOTÓN AUTO
     if st.button("🎲 Generar Automático", type="primary"):
@@ -650,12 +638,15 @@ if 'raw_requests_df' not in st.session_state:
 current_requests = st.session_state.raw_requests_df.to_dict('records')
 stats = calculate_stats(edited_df, current_requests, year_val)
 
+# MOSTRAR INSTRUCCIONES
+show_instructions()
+
 # 3. DRAFT ROOM (COPILOTO)
 st.divider()
 c_main, c_vis = st.columns([1, 2])
 
 with c_main:
-    st.subheader("2. Selección Manual (Copiloto)")
+    st.subheader("2. Selección Manual")
     
     all_names = edited_df['Nombre'].tolist()
     names_sorted = sorted(all_names, key=lambda x: (0 if "Jefe" in x else 1 if "Subjefe" in x else 2 if "Cond" in x else 3))
@@ -668,13 +659,43 @@ with c_main:
         c = curr_stats['credits']
         remaining = 13 - c
         
-        st.metric("Créditos Gastados", f"{c} / 13", delta=remaining, delta_color="normal")
+        # METRICA PRINCIPAL
+        st.metric("Créditos Totales", f"{c} / 13", delta=remaining, delta_color="normal")
         
+        # --- TABLERO DE PIEZAS DEL PUZZLE (GAMIFICACIÓN) ---
+        st.markdown("#### 🧩 Piezas del Puzzle")
+        
+        # Calcular qué pide la estrategia
+        recipe = STRATEGIES[strategy_key]['auto_recipe']
+        required_durs = [b['dur'] for b in recipe]
+        # Contar frecuencias requeridas (ej: {10: 3, 9: 1})
+        req_counts = {}
+        for r in required_durs: req_counts[r] = req_counts.get(r, 0) + 1
+        
+        # Calcular qué tiene el usuario
+        my_reqs = [r for r in current_requests if r['Nombre'] == selected_person]
+        my_durs = [(r['Fin'] - r['Inicio']).days + 1 for r in my_reqs]
+        curr_counts = {}
+        for d in my_durs: curr_counts[d] = curr_counts.get(d, 0) + 1
+        
+        # Visualizar Contadores
+        cols_puzzle = st.columns(len(req_counts))
+        for idx, (dur, total) in enumerate(req_counts.items()):
+            done = curr_counts.get(dur, 0)
+            # Color
+            border_col = "green" if done >= total else "red"
+            icon = "✅" if done >= total else "⏳"
+            with cols_puzzle[idx]:
+                st.caption(f"Bloques de {dur} días")
+                st.markdown(f"### {icon} {done}/{total}")
+
+        st.divider()
+
         if remaining <= 0:
             st.success("✅ Cupo cubierto.")
         else:
             month_range = st.select_slider("📅 Filtrar Meses:", options=MESES, value=(MESES[0], MESES[-1]))
-            st.info(f"🔍 Buscando fichas de tipo: {STRATEGIES[strategy_key]['name']}")
+            st.info(f"🔍 Buscando fichas...")
             
             options = get_available_blocks_for_person(
                 selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range, strategy_key
@@ -699,7 +720,6 @@ with c_main:
 
     st.markdown("---")
     st.write(f"**Mis Periodos:**")
-    my_reqs = [r for r in current_requests if r['Nombre'] == selected_person]
     if not my_reqs: st.caption("Ninguno")
     else:
         for i, r in enumerate(my_reqs):
