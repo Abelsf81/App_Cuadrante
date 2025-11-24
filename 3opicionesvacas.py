@@ -17,10 +17,10 @@ TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 
-# --- ESTRATEGIAS ---
+# --- ESTRATEGIAS DE VACACIONES ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (Recomendada)",
+        "name": "🛡️ Estándar (4 Bloques)",
         "desc": "10+10+10+9 días.",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
@@ -91,7 +91,7 @@ DEFAULT_ROSTER = [
 ]
 
 # -------------------------------------------------------------------
-# 1. LÓGICA BASE
+# 1. LÓGICA BASE Y UTILIDADES
 # -------------------------------------------------------------------
 
 def get_short_id(name, role, turn):
@@ -110,7 +110,7 @@ def generate_night_template():
     wb = Workbook()
     ws = wb.active; ws.title = "Plan Nocturnas"
     ws.append(["Inicio (dd/mm/yyyy)", "Fin (dd/mm/yyyy)", "Notas"])
-    ws.append(["2026-01-10", "2026-01-12", "Ejemplo"])
+    ws.append(["2026-01-10", "2026-01-12", "Ejemplo (Fin es crítico)"])
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
@@ -194,7 +194,6 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
     person = roster_df[roster_df['Nombre'] == person_name].iloc[0]
     start_month_idx = MESES.index(month_range[0]) + 1
     end_month_idx = MESES.index(month_range[1]) + 1
-    
     occupation_map = {i:[] for i in range(total_days)}
     my_current_slots = [] 
     for req in current_requests:
@@ -209,7 +208,6 @@ def get_available_blocks_for_person(person_name, roster_df, current_requests, ye
 
     block_defs = STRATEGIES[strategy_key]['blocks']
     options = {b['label']: [] for b in block_defs}
-    
     for d in range(total_days - 15): 
         d_date = datetime.date(year, 1, 1) + timedelta(days=d)
         if not (start_month_idx <= d_date.month <= end_month_idx): continue
@@ -339,9 +337,7 @@ def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, n
     return candidates
 
 def validate_and_generate_final(roster_df, requests, year, night_periods, forced_swaps=None):
-    """Calcula el calendario final aplicando vacaciones, coberturas y swaps forzados."""
     if forced_swaps is None: forced_swaps = []
-    
     base_schedule_turn, total_days = generate_base_schedule(year)
     final_schedule = {} 
     turn_coverage_counters = {'A': 0, 'B': 0, 'C': 0}
@@ -377,7 +373,6 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
         for name_missing in absent_people:
             person_row = roster_df[roster_df['Nombre'] == name_missing].iloc[0]
             
-            # 1. Verificar si hay SWAP forzado para este día y esta ausencia
             forced_coverer = None
             for fs in forced_swaps:
                 if fs['day_idx'] == d and fs['absent'] == name_missing:
@@ -385,12 +380,9 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
                     break
             
             chosen = None
-            
             if forced_coverer:
-                # Si hay swap forzado, lo usamos directamente (asumiendo que es válido)
                 chosen = forced_coverer
             else:
-                # Si no, usamos la IA
                 candidates = get_candidates(person_row, roster_df, d, final_schedule, year, night_periods, current_day_coverers)
                 if candidates:
                     valid = []
@@ -398,7 +390,6 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
                         prev = final_schedule[c][d-1] if d>0 else 'L'
                         prev2 = final_schedule[c][d-2] if d>1 else 'L'
                         if not (prev.startswith('T') and prev2.startswith('T')): valid.append(c)
-                    
                     if valid:
                         valid.sort(key=lambda x: (turn_coverage_counters[name_to_turn[x]], person_coverage_counters[x], random.random()))
                         chosen = valid[0]
@@ -439,64 +430,36 @@ def get_work_days_count(final_schedule):
 def find_swap_opportunities(work_days, adjustments_log, roster_df, year, night_periods):
     rich = [n for n, c in work_days.items() if c > 123]
     poor = [n for n, c in work_days.items() if c < 121]
-    
     opportunities = []
-    
     if not rich or not poor: return []
     
-    # Buscar en el log de ajustes donde un 'rico' esté cubriendo
     for adj in adjustments_log:
         day_idx, coverer, absentee = adj
         if coverer in rich:
-            # El rico está cubriendo. ¿Puede hacerlo un pobre?
-            # Necesitamos ver el estado del pobre ese día. 
-            # Nota: Esto es una simulación aproximada porque no tenemos el schedule completo aquí,
-            # pero podemos filtrar por reglas básicas.
-            
-            # Obtenemos candidatos validos RE-EVALUANDO para ese dia
-            # Importante: Al re-evaluar get_candidates, necesitamos el schedule base, 
-            # pero asumimos que si el pobre tiene <121, probablemente libra.
-            
-            # Simplificación: Verificamos compatibilidad básica
             cov_role = roster_df[roster_df['Nombre'] == coverer].iloc[0]['Rol']
             abs_role = roster_df[roster_df['Nombre'] == absentee].iloc[0]['Rol']
             
             for p_candidate in poor:
                 cand_row = roster_df[roster_df['Nombre'] == p_candidate].iloc[0]
-                
-                # 1. Check Rol
                 is_compatible = False
                 cr = cand_row['Rol']
-                mr = abs_role # Missing Role
-                # Misma lógica de get_candidates
+                mr = abs_role
                 if mr == "Jefe" and cr in ["Jefe", "Subjefe"]: is_compatible = True
                 elif mr == "Subjefe" and cr in ["Jefe", "Subjefe"]: is_compatible = True
                 elif mr == "Conductor" and (cr == "Conductor" or cand_row['SV']): is_compatible = True
                 elif mr == "Bombero" and (cr == "Bombero" or cand_row['SV']): is_compatible = True
                 
                 if is_compatible:
-                    # 2. Check Anti-24h (Aproximado)
                     if day_idx > 0 and is_in_night_period(day_idx-1, year, night_periods):
-                        # Si ayer hubo noche, chequear si el candidato es del turno saliente
                          base_sch, _ = generate_base_schedule(year)
-                         # Quien trabajo ayer en base?
                          turn_yesterday = None
                          for t in TEAMS: 
                              if base_sch[t][day_idx-1] == 'T': turn_yesterday = t
-                         
-                         if turn_yesterday and cand_row['Turno'] == turn_yesterday:
-                             continue # No valido por anti-24h
+                         if turn_yesterday and cand_row['Turno'] == turn_yesterday: continue
                     
-                    # Si pasa filtros básicos, proponemos
                     date_str = (datetime.date(year, 1, 1) + timedelta(days=day_idx)).strftime("%d/%m")
-                    opportunities.append({
-                        'day_idx': day_idx,
-                        'date_str': date_str,
-                        'rich': coverer,
-                        'poor': p_candidate,
-                        'absentee': absentee
-                    })
-                    if len(opportunities) > 5: return opportunities # Limitar sugerencias
+                    opportunities.append({'day_idx': day_idx, 'date_str': date_str, 'rich': coverer, 'poor': p_candidate, 'absentee': absentee})
+                    if len(opportunities) > 5: return opportunities
     return opportunities
 
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
@@ -573,10 +536,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V30.0 - EL MERCADO DE FICHAJES)
+# INTERFAZ STREAMLIT (V31.0 - FINAL CON MERCADO DE FICHAJES)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V30.0")
+st.set_page_config(layout="wide", page_title="Gestor V31.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
@@ -596,7 +559,7 @@ def show_instructions():
         * Pulsa **"🔀 Ejecutar"** y la App recalculará todo al instante.
         """)
 
-st.title("🚒 Gestor V30.0: El Mercado de Fichajes")
+st.title("🚒 Gestor V31.0: El Mercado de Fichajes")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 show_instructions()
 
@@ -637,7 +600,8 @@ with st.sidebar:
                     try:
                         v1 = row.iloc[0]; v2 = row.iloc[1]
                         if not pd.isnull(v1) and not pd.isnull(v2):
-                            d1 = pd.to_datetime(v1).date(); d2 = pd.to_datetime(v2).date()
+                            d1 = pd.to_datetime(v1).date()
+                            d2 = pd.to_datetime(v2).date()
                             st.session_state.nights.append((d1, d2)); c+=1
                     except: pass
                 if c>0: st.success(f"Añadidos {c} periodos.")
@@ -647,7 +611,7 @@ with st.sidebar:
     st.divider()
     def on_strategy_change():
         st.session_state.raw_requests_df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
-        st.session_state.forced_swaps = [] # Reset swaps too
+        st.session_state.forced_swaps = [] 
         st.toast("⚠️ Estrategia cambiada: Reinicio completo.", icon="🗑️")
 
     strategy_key = st.selectbox("🎯 Estrategia de Vacaciones", options=list(STRATEGIES.keys()), format_func=lambda x: STRATEGIES[x]['name'], on_change=on_strategy_change)
@@ -657,7 +621,7 @@ with st.sidebar:
         with st.spinner("Generando..."):
             new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights, strategy_key)
             st.session_state.raw_requests_df = pd.DataFrame(new_reqs)
-            st.session_state.forced_swaps = [] # Clear previous swaps on new gen
+            st.session_state.forced_swaps = []
         st.success("¡Hecho!")
         st.rerun()
 
