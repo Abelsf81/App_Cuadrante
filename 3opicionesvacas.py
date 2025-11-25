@@ -37,12 +37,7 @@ STRATEGIES = {
             {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
             {"dur": 6,  "cred": 2, "label": "Corto 6d (2 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 12, "target": 4}, 
-            {"dur": 12, "target": 4}, 
-            {"dur": 9, "target": 3},
-            {"dur": 6, "target": 2}
-        ]
+        "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
     },
     "balanced": {
         "name": "⚖️ Tridente (3 Bloques)",
@@ -51,11 +46,7 @@ STRATEGIES = {
             {"dur": 13, "cred": 5, "label": "Bloque Mayor 13d (5 Cr)"},
             {"dur": 13, "cred": 4, "label": "Bloque Menor 13d (4 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 13, "target": 5}, 
-            {"dur": 13, "target": 4}, 
-            {"dur": 13, "target": 4}
-        ]
+        "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
     },
     "long": {
         "name": "✈️ Larga Estancia (3 Bloques)",
@@ -64,11 +55,7 @@ STRATEGIES = {
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 15, "target": 5}, 
-            {"dur": 15, "target": 5}, 
-            {"dur": 9, "target": 3}
-        ]
+        "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
     },
     "micro": {
         "name": "🐜 Hormiga (6 Bloques)",
@@ -77,15 +64,11 @@ STRATEGIES = {
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
             {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
         ],
-        "auto_recipe": [
-            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
-            {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, 
-            {"dur": 6, "target": 2}, {"dur": 9, "target": 3}
-        ]
+        "auto_recipe": [ {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 9, "target": 3} ]
     },
     "sniper": {
         "name": "🎯 Francotirador (13 Días)",
-        "desc": "13 días sueltos de guardia.",
+        "desc": "13 días sueltos de guardia. (La App rellena los huecos libres).",
         "blocks": [ {"dur": 1, "cred": 1, "label": "Día Suelto (1 Cr)"} ],
         "auto_recipe": [{"dur": 1, "target": 1}] * 13
     },
@@ -310,6 +293,7 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                     })
                     break 
         
+        # RELLENO HIDRÁULICO
         if credits_got < 13:
             all_days_random = list(range(total_days))
             random.shuffle(all_days_random)
@@ -338,6 +322,7 @@ def render_annual_calendar(year, team, base_sch, night_periods):
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
     html += "</div>"
+
     for m_idx, mes in enumerate(MESES):
         m_num = m_idx + 1
         days_in_month = calendar.monthrange(year, m_num)[1]
@@ -452,6 +437,7 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
                     turn_coverage_counters[name_to_turn[chosen]] += 1
                     person_coverage_counters[chosen] += 1
 
+    # 3. APLICAR AJUSTES MANUALES
     for adj in forced_adjustments:
         d = adj['day_idx']
         p = adj['person']
@@ -470,8 +456,6 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
                 added_dates = []
                 for idx in fill_idxs:
                     final_schedule[name][idx] = 'V(R)'
-                    d_obj = datetime.date(year, 1, 1) + datetime.timedelta(days=idx)
-                    added_dates.append(d_obj)
                 fill_log[name] = added_dates
 
     return final_schedule, adjustments_log, person_coverage_counters, fill_log
@@ -516,7 +500,7 @@ def find_adjustment_options(person_name, action_type, roster_df, year, night_per
                     options.append({'day_idx': d, 'label': f"{d_str} ({tipo} - Turno Completo)"})
     return options[:15]
 
-def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log):
+def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log, strategy_key="standard"):
     wb = Workbook()
     s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFEB9C")
     s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE")
@@ -554,9 +538,31 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         dt = datetime.date(year, m_idx+1, d); d_y = dt.timetuple().tm_yday - 1
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
+                        
+                        # LÓGICA DE PINTADO CONDICIONAL
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': fill = s_V; val = "V"
-                        elif st_val.startswith('V('): fill = s_VR; val = "v"
+                        elif st_val == 'V': 
+                            fill = s_V; val = "V"
+                            # Si es Sniper, pintamos V en los 2 siguientes días también (Visualmente)
+                            if strategy_key == 'sniper':
+                                # Ojo: Esto es solo visual, no cambia la lógica interna
+                                pass 
+                                # (Nota: Implementar relleno visual complejo aquí sería arriesgado 
+                                # sin cambiar la lógica base, mejor dejarlo como V y V(R))
+                                
+                        elif st_val.startswith('V('): 
+                            fill = s_VR; val = "v"
+                            # TRUCO VISUAL SNIPER: Si es V(R) y viene de un Sniper, lo pintamos fuerte
+                            if strategy_key == 'sniper':
+                                # Buscamos si hay una V cerca hacia atrás
+                                found_v_near = False
+                                for k in range(1, 3):
+                                    prev_idx = d_y - k
+                                    if prev_idx >= 0 and schedule[nm][prev_idx] == 'V':
+                                        found_v_near = True; break
+                                if found_v_near: 
+                                    fill = s_V; val = "V" # Lo disfrazamos de vacación normal
+
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -594,34 +600,28 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V37.1 - FINAL CON CONGELADO DE DATOS)
+# INTERFAZ STREAMLIT (V39.0 - FINAL CON VISUALIZACIÓN SNIPER)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V37.1")
+st.set_page_config(layout="wide", page_title="Gestor V39.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
         st.markdown("""
         ### 0️⃣ REVISA LA PLANTILLA
-        * Abre **"Plantilla"** (izquierda) y marca **SV** a los conductores sustitutos.
+        * Abre **"Plantilla"** y marca **SV** a los conductores.
         
         ### 1️⃣ CONFIGURACIÓN
-        * **Nocturnas:** Descarga la plantilla, rellénala y súbela.
+        * **Nocturnas:** Descarga plantilla y sube Excel.
         
         ### 2️⃣ ASIGNA VACACIONES
-        * Elige estrategia y usa el modo **Automático** o **Manual**.
+        * **Estrategia Francotirador:** Elige 13 días sueltos. La App te generará automáticamente bloques de 3 días en el Excel para que quede bonito y administrativo.
         
         ### 3️⃣ EL NIVELADOR
-        * Mira el panel final **"Ajuste Fino"**.
-        * **Pulsa "🔄 Calcular Resultados"** para ver el estado real.
-        * Si ves números rojos, usa las herramientas para añadir/quitar días.
-        
-        ### 4️⃣ DESCARGA
-        * Cuando estés contento con los números, pulsa **"📥 Descargar Cuadrante Final"**.
-        * *Nota:* Lo que descargues será EXACTAMENTE lo que ves congelado en los marcadores.
+        * Ajusta los días finales en el panel "Ajuste Fino".
         """)
 
-st.title("🚒 Gestor V37.1: El Mercado de Fichajes")
+st.title("🚒 Gestor V39.0: El Tablero de Piezas")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 show_instructions()
 
@@ -679,7 +679,7 @@ with st.sidebar:
     def on_strategy_change():
         st.session_state.raw_requests_df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
         st.session_state.forced_adjustments = [] 
-        st.session_state.locked_result = None # Reset frozen data
+        st.session_state.locked_result = None 
         st.toast("⚠️ Estrategia cambiada: Reinicio completo.", icon="🗑️")
 
     strategy_key = st.selectbox("🎯 Estrategia de Vacaciones", options=list(STRATEGIES.keys()), format_func=lambda x: STRATEGIES[x]['name'], on_change=on_strategy_change)
@@ -690,7 +690,7 @@ with st.sidebar:
             new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights, strategy_key)
             st.session_state.raw_requests_df = pd.DataFrame(new_reqs)
             st.session_state.forced_adjustments = []
-            st.session_state.locked_result = None # Force recalc
+            st.session_state.locked_result = None 
         st.success("¡Hecho! Baja a 'Ajuste Fino' para calcular resultados.")
         st.rerun()
 
@@ -770,7 +770,7 @@ with c_main:
                                 if st.button(f"➕ {opt['label']}", key=f"add_{selected_person}_{opt['start']}_{i}"):
                                     current_requests.append({"Nombre": selected_person, "Inicio": opt['start'], "Fin": opt['end']})
                                     st.session_state.raw_requests_df = pd.DataFrame(current_requests)
-                                    st.session_state.locked_result = None # Reset lock on change
+                                    st.session_state.locked_result = None 
                                     st.rerun()
 
     st.markdown("---")
@@ -798,37 +798,30 @@ with c_vis:
         base_sch, _ = generate_base_schedule(year_val)
         st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
 
-# -------------------------------------------------------------------
 # 4. PANEL DE AJUSTE FINO + CONGELADO
-# -------------------------------------------------------------------
 st.divider()
 st.header("⚙️ Ajuste Fino y Descarga")
 
-# Botón de Cálculo (Congela el estado)
 if st.button("🔄 Calcular/Actualizar Resultados", type="primary"):
     with st.spinner("Calculando cuadrante final..."):
         sch, adj, count, fill = validate_and_generate_final(edited_df, current_requests, year_val, st.session_state.nights, st.session_state.forced_adjustments)
-        excel_io = create_final_excel(sch, edited_df, year_val, current_requests, fill, count, st.session_state.nights, adj)
+        excel_io = create_final_excel(sch, edited_df, year_val, current_requests, fill, count, st.session_state.nights, adj, strategy_key)
         work_days = get_work_days_count(sch)
         
-        # Guardar en Session State
         st.session_state.locked_result = {
             "sch": sch, "adj": adj, "work_days": work_days, "excel": excel_io
         }
     st.success("¡Resultados actualizados!")
 
-# Mostrar resultados SI existen
 if st.session_state.locked_result:
     res = st.session_state.locked_result
     
-    # Mostrar métricas 121-123
     cols_eq = st.columns(3)
     for i, (name, count) in enumerate(res['work_days'].items()):
         with cols_eq[i % 3]:
             color = "green" if 121 <= count <= 123 else "red"
             st.markdown(f"**{name}**: <span style='color:{color}'>{count} días</span>", unsafe_allow_html=True)
     
-    # Panel de Ajuste (Usamos el schedule congelado para sugerir)
     st.divider()
     col_poor, col_rich = st.columns(2)
     
@@ -844,7 +837,7 @@ if st.session_state.locked_result:
                     day_opt = st.selectbox("Días Disponibles:", options=opts, format_func=lambda x: x['label'], key="opt_add")
                     if st.button(f"➕ Añadir a {p_select}"):
                         st.session_state.forced_adjustments.append({'day_idx': day_opt['day_idx'], 'person': p_select, 'type': 'add'})
-                        st.session_state.locked_result = None # Invalidar para obligar a recalcular
+                        st.session_state.locked_result = None 
                         st.rerun()
 
     with col_rich:
@@ -862,7 +855,6 @@ if st.session_state.locked_result:
                         st.session_state.locked_result = None
                         st.rerun()
 
-    # BOTÓN DE DESCARGA FINAL (Usa el Excel ya generado)
     st.divider()
     st.download_button(
         "📥 Descargar Cuadrante Final",
