@@ -20,8 +20,8 @@ MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "
 # --- ESTRATEGIAS DE VACACIONES ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (10+10+10+9)",
-        "desc": "3 bloques de 10 días y 1 de 9 días.",
+        "name": "🛡️ Estándar (4 Bloques)",
+        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
             {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
@@ -30,8 +30,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 10, "target": 4}, {"dur": 10, "target": 3}, {"dur": 10, "target": 3}, {"dur": 9, "target": 3} ]
     },
     "safe": {
-        "name": "🔢 Matemática Pura (12+12+9+6)",
-        "desc": "Bloques múltiplos de 3. Siempre cuadran.",
+        "name": "🔢 Matemática Pura (4 Bloques)",
+        "desc": "12+12+9+6 días. Indestructible.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
@@ -40,8 +40,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
     },
     "balanced": {
-        "name": "⚖️ Tridente (13+13+13)",
-        "desc": "3 bloques grandes de 13 días.",
+        "name": "⚖️ Tridente (3 Bloques)",
+        "desc": "13+13+13 días.",
         "blocks": [
             {"dur": 13, "cred": 5, "label": "Bloque 13d (5 Cr)"},
             {"dur": 13, "cred": 4, "label": "Bloque 13d (4 Cr)"}
@@ -49,8 +49,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
     },
     "long": {
-        "name": "✈️ Larga Estancia (15+15+9)",
-        "desc": "2 viajes largos de 15 días y una escapada.",
+        "name": "✈️ Larga Estancia (3 Bloques)",
+        "desc": "15+15+9 días.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
@@ -58,8 +58,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
     },
     "micro": {
-        "name": "🐜 Hormiga (5x6 + 9)",
-        "desc": "5 periodos de 6 días + 1 de 9 días.",
+        "name": "🐜 Hormiga (6 Bloques)",
+        "desc": "5x6 días + 1x9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
             {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
@@ -68,13 +68,13 @@ STRATEGIES = {
     },
     "sniper": {
         "name": "🎯 Francotirador (13 Días)",
-        "desc": "13 días sueltos de guardia. Relleno automático de descansos.",
+        "desc": "13 días sueltos de guardia.",
         "blocks": [ {"dur": 1, "cred": 1, "label": "Día Suelto (1 Cr)"} ],
         "auto_recipe": [{"dur": 1, "target": 1}] * 13
     },
     "balanced_plus": {
-        "name": "🧩 Flexible (4x8 + 1x7)",
-        "desc": "4 periodos de 8 días y 1 de 7 días.",
+        "name": "🧩 4x8 + 1x7 (Flexible)",
+        "desc": "4 de 8 días + 1 de 7 días.",
         "blocks": [
             {"dur": 8, "cred": 3, "label": "8d (3 Cr)"},
             {"dur": 8, "cred": 2, "label": "8d (2 Cr)"},
@@ -196,19 +196,15 @@ def get_clustered_dates(available_idxs, needed_count):
 def check_global_conflict_generic(start_idx, duration, person, occupation_map, base_sch, year, transition_dates):
     total_days = len(base_sch['A'])
     if start_idx + duration > total_days: return True
-
     for i in range(start_idx, start_idx + duration):
         d_obj = datetime.date(year, 1, 1) + timedelta(days=i)
         if d_obj in transition_dates:
             if base_sch[person['Turno']][i] == 'T': return True
-        
         occupants = occupation_map.get(i, [])
         if len(occupants) >= 2: return True
-        
         for occ in occupants:
             if occ['Turno'] == person['Turno']: return True
             if person['Rol'] != 'Bombero' and occ['Rol'] == person['Rol']: return True
-            
     return False
 
 def book_slot_gen(start_idx, duration, person, occupation_map):
@@ -323,12 +319,13 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
     
+    # Leyenda
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
-        <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
-        <span style='background:#FFC000; color:#000; padding:2px 5px; border:1px solid #DAA520;'>V (Pedido)</span>
-        <span style='background:#FFF9C4; color:#555; padding:2px 5px; border:1px solid #FFF59D;'>V(R) (Relleno)</span>
+        <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Día)</span>
         <span style='background:#28a745; color:white; padding:2px 5px;'>T (Noche)</span>
+        <span style='background:#FFC000; color:#000; padding:2px 5px; border:1px solid #DAA520;'>V (Pedido)</span>
+        <span style='background:#FFFFE0; color:#555; padding:2px 5px; border:1px solid #EEE8AA;'>V(R) (Relleno)</span>
         <span style='border:2px solid red; padding:0px 5px; color:red;'>Fin Noche</span>
     </div>
     """
@@ -354,15 +351,21 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
 
                 bg_color = "#eee"; text_color = "#ccc"; border = "1px solid #fff"
                 
-                if final_val == 'T': 
+                # 1. Lógica base (Trabajo o Libre)
+                if state == 'T': 
                     bg_color = "#d4edda"; text_color = "#155724"
-                    if is_in_night_period(d_idx, year, night_periods):
-                        bg_color = "#28a745"; text_color = "white"
-                elif final_val == 'V':
-                    bg_color = "#FFC000"; text_color = "#000" # Oro
-                elif final_val == 'V(R)':
-                    bg_color = "#FFF9C4"; text_color = "#555" # Crema
                 
+                # 2. Lógica de Nocturnas (Fondo Gris / Verde Oscuro)
+                if is_in_night_period(d_idx, year, night_periods):
+                    if state == 'T': bg_color = "#28a745"; text_color = "white" # Noche T
+                    else: bg_color = "#aaa"; text_color = "#555" # Noche L (Gris recuperado)
+
+                # 3. Lógica de Vacaciones (Sobreescribe)
+                if final_val == 'V':
+                    bg_color = "#FFC000"; text_color = "#000" # Oro
+                elif final_val == 'V(R)' or final_val == 'V(L)':
+                    bg_color = "#FFFFE0"; text_color = "#555" # Crema
+
                 if dt in get_night_transition_dates(night_periods): border = "2px solid red"
 
                 html += f"<div style='width:20px; background-color:{bg_color}; color:{text_color}; text-align:center; border:{border}; border-radius:2px;'>{state[0]}</div>"
@@ -468,7 +471,6 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
 
     fill_log = {}
     for name in roster_df['Nombre']:
-        # LÓGICA SNIPER DE RELLENO (Sándwich T+2L)
         if strategy_key == 'sniper':
             sched = final_schedule[name]
             for d in range(total_days - 2):
@@ -568,6 +570,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         if st_val == 'T': fill = s_T; val = "T"
                         elif st_val == 'V': fill = s_V; val = "V"
                         elif st_val == 'V(R)': fill = s_VR; val = "v"
+                        elif st_val == 'V(L)': fill = s_VR; val = "v" # Color Crema para V en dias L tambien
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -605,10 +608,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V42.0 - RELLENO INTELIGENTE SNIPER)
+# INTERFAZ STREAMLIT (V43.0)
 # -------------------------------------------------------------------
 
-st.set_page_config(layout="wide", page_title="Gestor V42.0")
+st.set_page_config(layout="wide", page_title="Gestor V43.0")
 
 def show_instructions():
     with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
@@ -621,14 +624,14 @@ def show_instructions():
         
         ### 2️⃣ ASIGNA VACACIONES
         * Elige estrategia y usa el modo **Automático** o **Manual**.
-        * **Estrategia Francotirador:** Elige 13 días sueltos. La App agrupará automáticamente los días libres siguientes para crear bloques de 3 días en el Excel.
+        * **Estrategia Francotirador:** Elige 13 días sueltos.
         
         ### 3️⃣ EL NIVELADOR
         * Pulsa "🔄 Calcular Resultados".
         * Ajusta los días en el panel "Ajuste Fino" para llegar a 121-123.
         """)
 
-st.title("🚒 Gestor V42.0: El Tablero de Piezas")
+st.title("🚒 Gestor V43.0: El Tablero de Piezas")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 show_instructions()
 
@@ -662,6 +665,9 @@ with st.sidebar:
         if st.button("Añadir Nocturna"):
             if dn_s and dn_e: st.session_state.nights.append((dn_s, dn_e))
         st.write(f"Periodos: {len(st.session_state.nights)}")
+        
+        st.download_button(label="⬇️ Descargar Plantilla Nocturnas", data=generate_night_template(), file_name="plantilla_nocturnas.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
         uploaded_n = st.file_uploader("Excel Nocturnas", type=['xlsx'], key="n_up")
         if uploaded_n:
             try:
@@ -804,7 +810,7 @@ with c_vis:
             e = r['Fin'].timetuple().tm_yday - 1
             for d in range(s, e+1):
                 if temp_sch[d] == 'T': temp_sch[d] = 'V'
-                else: temp_sch[d] = 'V(L)'
+                else: temp_sch[d] = 'V(L)' # Por defecto para visualización
         
         if strategy_key == 'sniper':
              for d in range(len(temp_sch) - 2):
@@ -817,7 +823,7 @@ with c_vis:
         base_sch, _ = generate_base_schedule(year_val)
         st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
 
-# 4. PANEL DE AJUSTE FINO
+# 4. PANEL DE AJUSTE FINO + CONGELADO
 st.divider()
 st.header("⚙️ Ajuste Fino y Descarga")
 
