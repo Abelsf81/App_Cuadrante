@@ -17,9 +17,9 @@ from datetime import timedelta
 # 1. CONFIGURACIÓN Y CONSTANTES
 # ==============================================================================
 
-st.set_page_config(layout="wide", page_title="Gestor V50.1")
+st.set_page_config(layout="wide", page_title="Gestor V51.0")
 
-# --- CONTRASEÑA DE ADMINISTRADOR ---
+# --- CONTRASEÑA ---
 ADMIN_PASSWORD = "lucena2026" 
 
 TEAMS = ['A', 'B', 'C']
@@ -85,7 +85,7 @@ STRATEGIES = {
     },
     "balanced_plus": {
         "name": "🧩 Flexible (4x8 + 1x7)",
-        "desc": "4 de 8 días + 1 de 7 días.",
+        "desc": "4 periodos de 8 días + 1 de 7 días.",
         "blocks": [
             {"dur": 8, "cred": 3, "label": "8d (3 Cr)"},
             {"dur": 8, "cred": 2, "label": "8d (2 Cr)"},
@@ -345,12 +345,12 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                             })
     return generated_requests
 
-# --- FUNCIÓN DEL MAPA GLOBAL (PARA INVITADOS) ---
+# --- NUEVA FUNCIÓN: MAPA DE CALOR GLOBAL (V50) ---
 def render_global_occupation_calendar(year, roster_df, requests, night_periods):
     base_sch, total_days = generate_base_schedule(year)
     transition_dates = get_night_transition_dates(night_periods)
     
-    # Mapa: Día -> Lista de Personas de Vacaciones
+    # Mapa: Día -> Lista de Personas
     occ_map = {d: [] for d in range(total_days)}
     
     for req in requests:
@@ -415,7 +415,6 @@ def render_global_occupation_calendar(year, roster_df, requests, night_periods):
 
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
-    
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
         <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
@@ -649,10 +648,12 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         dt = datetime.date(year, m_idx+1, d); d_y = dt.timetuple().tm_yday - 1
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
-                        
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': fill = s_V; val = "V" # Oro
-                        elif st_val == 'V(R)': fill = s_VR; val = "v" # Crema
+                        elif st_val == 'V': 
+                            fill = s_V; val = "V"
+                        elif st_val == 'V(R)': 
+                            fill = s_VR; val = "v"
+                            if strategy_key == 'sniper': fill = s_V; val = "V" 
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -660,7 +661,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                             val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
                         elif st_val == 'T+': fill = s_Extra; val = "T+"
                         elif st_val == 'L*': fill = s_Free; val = "L"
-                        
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -690,10 +690,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # ==============================================================================
-# INTERFAZ STREAMLIT (V50.1 - FINAL ABSOLUTA)
+# INTERFAZ STREAMLIT (V51.0)
 # ==============================================================================
 
-st.title("🚒 Gestor V50.1: Cerebro Compartido")
+st.title("🚒 Gestor V51.0: Cerebro Compartido")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
@@ -706,19 +706,27 @@ with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
     
     ### 🔐 ACCESO ADMIN
     * Introduce la contraseña para editar vacaciones o generar el Excel.
-    
-    ### 0️⃣ REVISA LA PLANTILLA (Admin)
-    * Marca **SV** a los conductores.
     """)
 
-# CARGA INICIAL DE DATOS
-current_requests_df, current_adjustments = load_data()
-st.session_state.raw_requests_df = current_requests_df
-st.session_state.forced_adjustments = current_adjustments
+# --- INICIALIZACIÓN BLINDADA DE ESTADO (AQUÍ ES LA CLAVE) ---
+if 'nights' not in st.session_state: st.session_state.nights = []
+if 'roster_data' not in st.session_state: st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
+if 'raw_requests_df' not in st.session_state:
+    # Intentar cargar datos persistentes al inicio
+    df_load, adj_load = load_data()
+    st.session_state.raw_requests_df = df_load
+    st.session_state.forced_adjustments = adj_load
+if 'forced_adjustments' not in st.session_state: st.session_state.forced_adjustments = []
 if 'locked_result' not in st.session_state: st.session_state.locked_result = None
 
-current_requests = st.session_state.raw_requests_df.to_dict('records')
-stats = calculate_stats(edited_df if 'edited_df' in locals() else pd.DataFrame(DEFAULT_ROSTER), current_requests, 2026)
+# VARIABLES GLOBALES DESPUÉS DE INICIALIZAR
+current_requests_df = st.session_state.raw_requests_df
+current_requests = current_requests_df.to_dict('records')
+year_val = 2026 # Valor por defecto inicial
+edited_df = st.session_state.roster_data
+
+# CALCULAR STATS (AHORA ES SEGURO)
+stats = calculate_stats(edited_df, current_requests, year_val)
 
 # BARRA LATERAL (LOGIN)
 with st.sidebar:
@@ -731,11 +739,9 @@ with st.sidebar:
         st.success("🔓 Modo Edición Activado")
         # --- CONTROLES DE ADMIN ---
         st.header("Configuración")
-        year_val = st.number_input("Año", value=2026)
+        year_val = st.number_input("Año", value=2026) # Sobrescribe el valor por defecto
         
         with st.expander("Plantilla"):
-            if 'roster_data' not in st.session_state:
-                st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
             column_cfg = {
                 "ID_Puesto": st.column_config.TextColumn(disabled=True),
                 "Turno": st.column_config.SelectboxColumn(options=TEAMS, required=True),
@@ -751,7 +757,6 @@ with st.sidebar:
             st.session_state.roster_data = edited_df
             
         with st.expander("Nocturnas"):
-            if 'nights' not in st.session_state: st.session_state.nights = []
             c1, c2 = st.columns(2)
             dn_s = c1.date_input("Inicio", key="n_s", value=None)
             dn_e = c2.date_input("Fin", key="n_e", value=None)
@@ -794,12 +799,7 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("Introduce la contraseña para editar.")
-        # Valores por defecto para visualización
-        year_val = 2026
-        if 'roster_data' not in st.session_state:
-             st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
-        edited_df = st.session_state.roster_data 
-        strategy_key = "standard" 
+        strategy_key = "standard" # Por defecto para ver
 
 
 # 3. VISUALIZACIÓN Y EDICIÓN
@@ -1013,9 +1013,10 @@ else:
     all_names = edited_df['Nombre'].tolist()
     names_sorted = sorted(all_names, key=lambda x: (0 if "Jefe" in x else 1 if "Subjefe" in x else 2 if "Cond" in x else 3))
     
-    viewer_person = st.selectbox("🔍 Ver calendario individual de:", names_sorted)
+    viewer_person = st.selectbox("🔍 Consultar calendario de:", names_sorted)
     
     if viewer_person:
+        # Calcular vista read-only
         p_row = edited_df[edited_df['Nombre'] == viewer_person].iloc[0]
         turn = p_row['Turno']
         
@@ -1023,6 +1024,7 @@ else:
         temp_sch = base_sch[turn].copy()
         my_reqs = [r for r in current_requests if r['Nombre'] == viewer_person]
         
+        # Estrategia visual por defecto (Standard)
         for r in my_reqs:
             s = r['Inicio'].timetuple().tm_yday - 1
             e = r['Fin'].timetuple().tm_yday - 1
@@ -1030,7 +1032,9 @@ else:
                 if temp_sch[d] == 'T': temp_sch[d] = 'V'
                 else: temp_sch[d] = 'V(L)'
         
+        # Mostrar calendario
         st.markdown(render_annual_calendar(year_val, turn, base_sch, st.session_state.nights, temp_sch), unsafe_allow_html=True)
         
+        # Mostrar Stats Básicos
         curr_stats = stats.get(viewer_person, {'credits': 0, 'natural': 0})
         st.metric("Créditos Gastados", f"{curr_stats['credits']} / 13")
