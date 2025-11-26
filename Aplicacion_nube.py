@@ -17,7 +17,7 @@ from datetime import timedelta
 # 1. CONFIGURACIÓN Y CONSTANTES
 # ==============================================================================
 
-st.set_page_config(layout="wide", page_title="Gestor V46.3")
+st.set_page_config(layout="wide", page_title="Gestor V46.4")
 
 TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
@@ -28,8 +28,8 @@ ADJ_FILE = "ajustes_db.csv"
 # --- ESTRATEGIAS ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (4 Bloques)",
-        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
+        "name": "🛡️ Estándar (10+10+10+9)",
+        "desc": "3 bloques de 10 días y 1 de 9 días.",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
             {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
@@ -38,8 +38,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 10, "target": 4}, {"dur": 10, "target": 3}, {"dur": 10, "target": 3}, {"dur": 9, "target": 3} ]
     },
     "safe": {
-        "name": "🔢 Matemática Pura",
-        "desc": "12+12+9+6 días. Indestructible.",
+        "name": "🔢 Matemática Pura (12+12+9+6)",
+        "desc": "Bloques múltiplos de 3. Siempre cuadran.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
@@ -48,8 +48,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
     },
     "balanced": {
-        "name": "⚖️ Tridente",
-        "desc": "13+13+13 días.",
+        "name": "⚖️ Tridente (13+13+13)",
+        "desc": "3 bloques grandes de 13 días.",
         "blocks": [
             {"dur": 13, "cred": 5, "label": "Bloque 13d (5 Cr)"},
             {"dur": 13, "cred": 4, "label": "Bloque 13d (4 Cr)"}
@@ -57,8 +57,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
     },
     "long": {
-        "name": "✈️ Larga Estancia",
-        "desc": "15+15+9 días.",
+        "name": "✈️ Larga Estancia (15+15+9)",
+        "desc": "2 viajes largos de 15 días y una escapada.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
@@ -66,8 +66,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
     },
     "micro": {
-        "name": "🐜 Hormiga",
-        "desc": "5x6 días + 1x9 días.",
+        "name": "🐜 Hormiga (5x6 + 9)",
+        "desc": "5 bloques de 6 días y 1 de 9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
             {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
@@ -75,14 +75,14 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 9, "target": 3} ]
     },
     "sniper": {
-        "name": "🎯 Francotirador",
+        "name": "🎯 Francotirador (13 Días)",
         "desc": "13 días sueltos de guardia.",
         "blocks": [ {"dur": 1, "cred": 1, "label": "Día Suelto (1 Cr)"} ],
         "auto_recipe": [{"dur": 1, "target": 1}] * 13
     },
     "balanced_plus": {
         "name": "🧩 Flexible (4x8 + 1x7)",
-        "desc": "4 de 8 días + 1 de 7 días.",
+        "desc": "4 periodos de 8 días y 1 de 7 días.",
         "blocks": [
             {"dur": 8, "cred": 3, "label": "8d (3 Cr)"},
             {"dur": 8, "cred": 2, "label": "8d (2 Cr)"},
@@ -119,38 +119,6 @@ DEFAULT_ROSTER = [
 # ==============================================================================
 # 2. DEFINICIÓN DE TODAS LAS FUNCIONES (MOTOR)
 # ==============================================================================
-
-@st.cache_data
-def generate_base_schedule(year):
-    is_leap = calendar.isleap(year)
-    total_days = 366 if is_leap else 365
-    status = {'A': 0, 'B': 2, 'C': 1} 
-    schedule = {team: [] for team in TEAMS}
-    for _ in range(total_days):
-        for t in TEAMS:
-            schedule[t].append('T' if status[t] == 0 else 'L')
-            status[t] = (status[t] + 1) % 3
-    return schedule, total_days
-
-def calculate_stats(roster_df, requests, year):
-    # ESTA FUNCIÓN SE COLOCA AQUÍ ARRIBA PARA EVITAR NAME_ERROR
-    base_sch, _ = generate_base_schedule(year)
-    stats = {}
-    for _, p in roster_df.iterrows():
-        stats[p['Nombre']] = {'credits': 0, 'natural': 0}
-    for req in requests:
-        name = req['Nombre']
-        if name not in stats: continue
-        s_idx = req['Inicio'].timetuple().tm_yday - 1
-        e_idx = req['Fin'].timetuple().tm_yday - 1
-        row = roster_df[roster_df['Nombre'] == name].iloc[0]
-        nat = (e_idx - s_idx) + 1
-        cred = 0
-        for d in range(s_idx, e_idx + 1):
-            if base_sch[row['Turno']][d] == 'T': cred += 1
-        stats[name]['credits'] += cred
-        stats[name]['natural'] += nat
-    return stats
 
 def load_data():
     if os.path.exists(DB_FILE):
@@ -196,6 +164,18 @@ def generate_night_template():
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
+@st.cache_data
+def generate_base_schedule(year):
+    is_leap = calendar.isleap(year)
+    total_days = 366 if is_leap else 365
+    status = {'A': 0, 'B': 2, 'C': 1} 
+    schedule = {team: [] for team in TEAMS}
+    for _ in range(total_days):
+        for t in TEAMS:
+            schedule[t].append('T' if status[t] == 0 else 'L')
+            status[t] = (status[t] + 1) % 3
+    return schedule, total_days
+
 def is_in_night_period(day_idx, year, night_periods):
     current_date = datetime.date(year, 1, 1) + datetime.timedelta(days=day_idx)
     for start, end in night_periods:
@@ -208,6 +188,26 @@ def get_night_transition_dates(night_periods):
     for start, end in night_periods:
         dates.add(end) 
     return dates
+
+# --- ESTA ES LA FUNCIÓN QUE DABA ERROR, AHORA ESTÁ AL PRINCIPIO ---
+def calculate_stats(roster_df, requests, year):
+    base_sch, _ = generate_base_schedule(year)
+    stats = {}
+    for _, p in roster_df.iterrows():
+        stats[p['Nombre']] = {'credits': 0, 'natural': 0}
+    for req in requests:
+        name = req['Nombre']
+        if name not in stats: continue
+        s_idx = req['Inicio'].timetuple().tm_yday - 1
+        e_idx = req['Fin'].timetuple().tm_yday - 1
+        row = roster_df[roster_df['Nombre'] == name].iloc[0]
+        nat = (e_idx - s_idx) + 1
+        cred = 0
+        for d in range(s_idx, e_idx + 1):
+            if base_sch[row['Turno']][d] == 'T': cred += 1
+        stats[name]['credits'] += cred
+        stats[name]['natural'] += nat
+    return stats
 
 def get_clustered_dates(available_idxs, needed_count):
     if not available_idxs: return []
@@ -323,7 +323,6 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                     })
                     break 
         
-        # RELLENO HIDRÁULICO
         if credits_got < 13:
             all_days_random = list(range(total_days))
             random.shuffle(all_days_random)
@@ -345,6 +344,7 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
 
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
+    
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
         <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
@@ -582,7 +582,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         elif st_val == 'V': fill = s_V; val = "V"
                         elif st_val == 'V(R)': 
                             fill = s_VR; val = "v"
-                            if strategy_key == 'sniper': fill = s_V; val = "V" 
+                            if strategy_key == 'sniper': fill = s_V; val = "V"
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -590,7 +590,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                             val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
                         elif st_val == 'T+': fill = s_Extra; val = "T+"
                         elif st_val == 'L*': fill = s_Free; val = "L"
-                        
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -620,7 +619,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # ==============================================================================
-# INTERFAZ STREAMLIT
+# INTERFAZ STREAMLIT (V46.3 - CEREBRO COMPARTIDO + ORDEN CORREGIDO)
 # ==============================================================================
 
 st.title("🚒 Gestor V46.3: Cerebro Compartido")
@@ -651,11 +650,9 @@ st.session_state.forced_adjustments = current_adjustments
 if 'locked_result' not in st.session_state: st.session_state.locked_result = None
 
 current_requests = st.session_state.raw_requests_df.to_dict('records')
+stats = calculate_stats(edited_df, current_requests, year_val) # AHORA SÍ ESTÁ DEFINIDA
 
-# CALCULAR STATS (AHORA SÍ, DESPUÉS DE DEFINIR LA FUNCIÓN)
-stats = calculate_stats(edited_df, current_requests, year_val)
-
-# BARRA LATERAL
+# BARRA LATERAL (LOGIN)
 with st.sidebar:
     st.header("Configuración")
     year_val = st.number_input("Año", value=2026)
@@ -719,7 +716,7 @@ with st.sidebar:
         with st.spinner("Generando..."):
             new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights, strategy_key)
             df_new = pd.DataFrame(new_reqs)
-            save_data(df_new, []) # Reset ajustes
+            save_data(df_new, [])
             st.session_state.raw_requests_df = df_new
             st.session_state.forced_adjustments = []
             st.session_state.locked_result = None 
@@ -829,8 +826,8 @@ with c_vis:
             s = r['Inicio'].timetuple().tm_yday - 1
             e = r['Fin'].timetuple().tm_yday - 1
             for d in range(s, e+1):
-                if temp_sch[d] == 'T': temp_sch[d] = 'V' # Amarillo Fuerte
-                else: temp_sch[d] = 'V(R)' # Crema Suave
+                if temp_sch[d] == 'T': temp_sch[d] = 'V' 
+                else: temp_sch[d] = 'V(L)'
 
         if strategy_key == 'sniper':
              for d in range(len(temp_sch) - 2):
@@ -854,7 +851,6 @@ if st.button("🔄 Calcular/Actualizar Resultados", type="primary"):
         sch, adj, count, fill = validate_and_generate_final(edited_df, current_reqs, year_val, st.session_state.nights, adj_now, strategy_key)
         excel_io = create_final_excel(sch, edited_df, year_val, current_reqs, fill, count, st.session_state.nights, adj, strategy_key)
         work_days = get_work_days_count(sch)
-        
         st.session_state.locked_result = {
             "sch": sch, "adj": adj, "work_days": work_days, "excel": excel_io
         }
@@ -871,7 +867,6 @@ if st.session_state.locked_result:
     
     st.divider()
     col_poor, col_rich = st.columns(2)
-    
     with col_poor:
         st.subheader("📉 Falta Jornada (<121)")
         poor_people = [n for n, c in res['work_days'].items() if c < 121]
