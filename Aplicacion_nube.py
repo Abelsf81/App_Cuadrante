@@ -17,7 +17,7 @@ from datetime import timedelta
 # 1. CONFIGURACIÓN Y CONSTANTES
 # ==============================================================================
 
-st.set_page_config(layout="wide", page_title="Gestor V46.1")
+st.set_page_config(layout="wide", page_title="Gestor V46.2")
 
 TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
@@ -25,7 +25,6 @@ MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "
 DB_FILE = "vacaciones_db.csv"
 ADJ_FILE = "ajustes_db.csv"
 
-# --- ESTRATEGIAS DE VACACIONES ---
 STRATEGIES = {
     "standard": {
         "name": "🛡️ Estándar (4 Bloques)",
@@ -117,7 +116,7 @@ DEFAULT_ROSTER = [
 ]
 
 # ==============================================================================
-# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (MOTOR)
+# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (ORDEN CORRECTO)
 # ==============================================================================
 
 def load_data():
@@ -345,6 +344,7 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
     
+    # Leyenda
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
         <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
@@ -542,8 +542,8 @@ def find_adjustment_options(person_name, action_type, roster_df, year, night_per
 
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log, strategy_key="standard"):
     wb = Workbook()
-    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000") # ORO
-    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE") # CREMA
+    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000") # Oro
+    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE") # Crema
     s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
     s_Extra = PatternFill("solid", fgColor="ADD8E6"); s_Free = PatternFill("solid", fgColor="E6E6FA")
     font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
@@ -578,12 +578,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         dt = datetime.date(year, m_idx+1, d); d_y = dt.timetuple().tm_yday - 1
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
+                        
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': 
-                            fill = s_V; val = "V"
-                        elif st_val == 'V(R)': 
-                            fill = s_VR; val = "v"
-                            if strategy_key == 'sniper': fill = s_V; val = "V" 
+                        elif st_val == 'V': fill = s_V; val = "V" # ORO
+                        elif st_val == 'V(R)': fill = s_VR; val = "v" # CREMA
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -591,6 +589,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                             val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
                         elif st_val == 'T+': fill = s_Extra; val = "T+"
                         elif st_val == 'L*': fill = s_Free; val = "L"
+                        
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -623,7 +622,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
 # INTERFAZ STREAMLIT
 # ==============================================================================
 
-st.title("🚒 Gestor V46.1: Cerebro Compartido")
+st.title("🚒 Gestor V46.2: Cerebro Compartido")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
@@ -645,7 +644,6 @@ with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
     * Pulsa "🔄 Calcular Resultados" y ajusta los días. Los ajustes también se comparten.
     """)
 
-# CARGA INICIAL DE DATOS
 current_requests_df, current_adjustments = load_data()
 st.session_state.raw_requests_df = current_requests_df
 st.session_state.forced_adjustments = current_adjustments
