@@ -17,7 +17,7 @@ from datetime import timedelta
 # 1. CONFIGURACIÓN Y CONSTANTES
 # ==============================================================================
 
-st.set_page_config(layout="wide", page_title="Gestor V46.2")
+st.set_page_config(layout="wide", page_title="Gestor V46.3")
 
 TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
@@ -25,6 +25,7 @@ MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "
 DB_FILE = "vacaciones_db.csv"
 ADJ_FILE = "ajustes_db.csv"
 
+# --- ESTRATEGIAS ---
 STRATEGIES = {
     "standard": {
         "name": "🛡️ Estándar (4 Bloques)",
@@ -116,7 +117,7 @@ DEFAULT_ROSTER = [
 ]
 
 # ==============================================================================
-# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (ORDEN CORRECTO)
+# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (MOTOR)
 # ==============================================================================
 
 def load_data():
@@ -188,6 +189,7 @@ def get_night_transition_dates(night_periods):
         dates.add(end) 
     return dates
 
+# LA FUNCIÓN CALCULATE_STATS AHORA ESTÁ AQUÍ, ANTES DE SER LLAMADA
 def calculate_stats(roster_df, requests, year):
     base_sch, _ = generate_base_schedule(year)
     stats = {}
@@ -321,7 +323,6 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                     })
                     break 
         
-        # RELLENO HIDRÁULICO
         if credits_got < 13:
             all_days_random = list(range(total_days))
             random.shuffle(all_days_random)
@@ -343,8 +344,6 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
 
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
-    
-    # Leyenda
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
         <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
@@ -358,6 +357,7 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
     html += "</div>"
+
     for m_idx, mes in enumerate(MESES):
         m_num = m_idx + 1
         days_in_month = calendar.monthrange(year, m_num)[1]
@@ -366,9 +366,11 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
             if d <= days_in_month:
                 dt = datetime.date(year, m_num, d)
                 d_idx = dt.timetuple().tm_yday - 1
+                
                 state = base_sch[team][d_idx]
                 final_val = state
                 if custom_schedule: final_val = custom_schedule[d_idx]
+
                 bg_color = "#eee"; text_color = "#ccc"; border = "1px solid #fff"
                 if final_val == 'T': 
                     bg_color = "#d4edda"; text_color = "#155724"
@@ -542,8 +544,8 @@ def find_adjustment_options(person_name, action_type, roster_df, year, night_per
 
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log, strategy_key="standard"):
     wb = Workbook()
-    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000") # Oro
-    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE") # Crema
+    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000")
+    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE")
     s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
     s_Extra = PatternFill("solid", fgColor="ADD8E6"); s_Free = PatternFill("solid", fgColor="E6E6FA")
     font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
@@ -578,10 +580,12 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         dt = datetime.date(year, m_idx+1, d); d_y = dt.timetuple().tm_yday - 1
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
-                        
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': fill = s_V; val = "V" # ORO
-                        elif st_val == 'V(R)': fill = s_VR; val = "v" # CREMA
+                        elif st_val == 'V': 
+                            fill = s_V; val = "V"
+                        elif st_val == 'V(R)': 
+                            fill = s_VR; val = "v"
+                            if strategy_key == 'sniper': fill = s_V; val = "V"
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -589,7 +593,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                             val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
                         elif st_val == 'T+': fill = s_Extra; val = "T+"
                         elif st_val == 'L*': fill = s_Free; val = "L"
-                        
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -651,9 +654,8 @@ if 'locked_result' not in st.session_state: st.session_state.locked_result = Non
 
 current_requests = st.session_state.raw_requests_df.to_dict('records')
 
-# CALCULAR STATS (AHORA SÍ ESTÁ DEFINIDA)
+# CALCULAR STATS (AHORA SÍ, AL FINAL)
 stats = calculate_stats(edited_df, current_requests, year_val)
-
 
 # BARRA LATERAL
 with st.sidebar:
@@ -829,8 +831,8 @@ with c_vis:
             s = r['Inicio'].timetuple().tm_yday - 1
             e = r['Fin'].timetuple().tm_yday - 1
             for d in range(s, e+1):
-                if temp_sch[d] == 'T': temp_sch[d] = 'V' # Amarillo Fuerte
-                else: temp_sch[d] = 'V(R)' # Crema Suave
+                if temp_sch[d] == 'T': temp_sch[d] = 'V' 
+                else: temp_sch[d] = 'V(R)'
 
         if strategy_key == 'sniper':
              for d in range(len(temp_sch) - 2):
