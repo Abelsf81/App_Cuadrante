@@ -17,10 +17,10 @@ from datetime import timedelta
 # 1. CONFIGURACIÓN Y CONSTANTES
 # ==============================================================================
 
-st.set_page_config(layout="wide", page_title="Gestor V46.5")
+st.set_page_config(layout="wide", page_title="Gestor V46.6")
 
-# --- ¡AQUÍ ESTÁ LA CONTRASEÑA QUE FALTABA! ---
-ADMIN_PASSWORD = "lucena2026" 
+# --- CONTRASEÑA ---
+ADMIN_PASSWORD = "lucena2026"
 
 TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
@@ -325,6 +325,7 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                     })
                     break 
         
+        # RELLENO HIDRÁULICO
         if credits_got < 13:
             all_days_random = list(range(total_days))
             random.shuffle(all_days_random)
@@ -346,6 +347,7 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
 
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
+    
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
         <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
@@ -543,8 +545,8 @@ def find_adjustment_options(person_name, action_type, roster_df, year, night_per
 
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log, strategy_key="standard"):
     wb = Workbook()
-    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000")
-    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE")
+    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000") # ORO
+    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE") # CREMA
     s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
     s_Extra = PatternFill("solid", fgColor="ADD8E6"); s_Free = PatternFill("solid", fgColor="E6E6FA")
     font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
@@ -580,8 +582,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': 
-                            fill = s_V; val = "V"
+                        elif st_val == 'V': fill = s_V; val = "V"
                         elif st_val == 'V(R)': 
                             fill = s_VR; val = "v"
                             if strategy_key == 'sniper': fill = s_V; val = "V" 
@@ -621,18 +622,16 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # ==============================================================================
-# INTERFAZ STREAMLIT (V46.3 - CON CEREBRO COMPARTIDO Y LOGIN)
+# INTERFAZ STREAMLIT
 # ==============================================================================
 
-st.title("🚒 Gestor V46.3: Cerebro Compartido")
+st.title("🚒 Gestor V46.6: Cerebro Compartido")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
     st.markdown("""
     ### 🌐 MODO COMPARTIDO
-    Esta app guarda los cambios automáticamente en la nube.
-    * **Modo Invitado:** Solo puedes ver los calendarios (Modo Lectura).
-    * **Modo Admin:** Necesitas la contraseña para editar, añadir vacaciones o generar el Excel.
+    Esta app guarda los datos en el servidor. **Lo que tú guardes, lo verán tus compañeros.**
     
     ### 0️⃣ REVISA LA PLANTILLA (Admin)
     * Abre "Plantilla" y marca **SV** a los conductores.
@@ -648,9 +647,14 @@ with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
     """)
 
 # CARGA INICIAL DE DATOS
-current_requests_df, current_adjustments = load_data()
-st.session_state.raw_requests_df = current_requests_df
-st.session_state.forced_adjustments = current_adjustments
+# --- Inicializar session_state PRIMERO antes de usarlo ---
+if 'nights' not in st.session_state: st.session_state.nights = []
+if 'roster_data' not in st.session_state: st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
+if 'raw_requests_df' not in st.session_state:
+    df_load, adj_load = load_data()
+    st.session_state.raw_requests_df = df_load
+    st.session_state.forced_adjustments = adj_load
+if 'forced_adjustments' not in st.session_state: st.session_state.forced_adjustments = []
 if 'locked_result' not in st.session_state: st.session_state.locked_result = None
 
 current_requests = st.session_state.raw_requests_df.to_dict('records')
@@ -669,8 +673,7 @@ with st.sidebar:
         year_val = st.number_input("Año", value=2026)
         
         with st.expander("Plantilla"):
-            if 'roster_data' not in st.session_state:
-                st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
+            # Usamos session_state ya inicializado
             column_cfg = {
                 "ID_Puesto": st.column_config.TextColumn(disabled=True),
                 "Turno": st.column_config.SelectboxColumn(options=TEAMS, required=True),
@@ -686,7 +689,7 @@ with st.sidebar:
             st.session_state.roster_data = edited_df
             
         with st.expander("Nocturnas"):
-            if 'nights' not in st.session_state: st.session_state.nights = []
+            # Nights ya está inicializado arriba
             c1, c2 = st.columns(2)
             dn_s = c1.date_input("Inicio", key="n_s", value=None)
             dn_e = c2.date_input("Fin", key="n_e", value=None)
@@ -729,13 +732,12 @@ with st.sidebar:
             st.rerun()
     else:
         st.info("Introduce la contraseña para editar.")
+        # Valores por defecto para visualización
         year_val = 2026
-        edited_df = pd.DataFrame(DEFAULT_ROSTER)
-        strategy_key = "standard" 
-        if 'roster_data' not in st.session_state:
-             st.session_state.roster_data = pd.DataFrame(DEFAULT_ROSTER)
+        edited_df = st.session_state.roster_data # Usar lo que haya en memoria
+        strategy_key = "standard"
 
-# CALCULAR STATS (AHORA SÍ, DESPUÉS DE DEFINIR TODO)
+# CALCULAR STATS (AHORA SÍ, DESPUÉS DE TODO)
 stats = calculate_stats(edited_df, current_requests, year_val)
 
 # 3. VISUALIZACIÓN Y EDICIÓN
@@ -834,7 +836,6 @@ if is_admin:
                         st.rerun()
 
     with c_vis:
-        # VISOR ADMIN (CON PREVIEW DE SUS VACACIONES)
         if selected_person:
             p_row = edited_df[edited_df['Nombre'] == selected_person].iloc[0]
             turn = p_row['Turno']
@@ -849,7 +850,7 @@ if is_admin:
                 for d in range(s, e+1):
                     if temp_sch[d] == 'T': temp_sch[d] = 'V' 
                     else: temp_sch[d] = 'V(L)'
-            
+
             if strategy_key == 'sniper':
                  for d in range(len(temp_sch) - 2):
                      if temp_sch[d] == 'V' and temp_sch[d+1] == 'L': temp_sch[d+1] = 'V(R)'
