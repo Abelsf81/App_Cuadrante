@@ -14,10 +14,8 @@ from operator import itemgetter
 from datetime import timedelta
 
 # ==============================================================================
-# 1. CONFIGURACIÓN Y CONSTANTES
+# 1. CONSTANTES Y CONFIGURACIÓN
 # ==============================================================================
-
-st.set_page_config(layout="wide", page_title="Gestor V46.4")
 
 TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
@@ -25,11 +23,10 @@ MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "
 DB_FILE = "vacaciones_db.csv"
 ADJ_FILE = "ajustes_db.csv"
 
-# --- ESTRATEGIAS ---
 STRATEGIES = {
     "standard": {
-        "name": "🛡️ Estándar (10+10+10+9)",
-        "desc": "3 bloques de 10 días y 1 de 9 días.",
+        "name": "🛡️ Estándar (4 Bloques)",
+        "desc": "10+10+10+9 días. Requiere iniciar uno en T.",
         "blocks": [
             {"dur": 10, "cred": 4, "label": "Bloque 10d (4 Cr)"},
             {"dur": 10, "cred": 3, "label": "Bloque 10d (3 Cr)"},
@@ -38,8 +35,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 10, "target": 4}, {"dur": 10, "target": 3}, {"dur": 10, "target": 3}, {"dur": 9, "target": 3} ]
     },
     "safe": {
-        "name": "🔢 Matemática Pura (12+12+9+6)",
-        "desc": "Bloques múltiplos de 3. Siempre cuadran.",
+        "name": "🔢 Matemática Pura",
+        "desc": "12+12+9+6 días. Indestructible.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Medio 9d (3 Cr)"},
@@ -48,8 +45,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
     },
     "balanced": {
-        "name": "⚖️ Tridente (13+13+13)",
-        "desc": "3 bloques grandes de 13 días.",
+        "name": "⚖️ Tridente",
+        "desc": "13+13+13 días.",
         "blocks": [
             {"dur": 13, "cred": 5, "label": "Bloque 13d (5 Cr)"},
             {"dur": 13, "cred": 4, "label": "Bloque 13d (4 Cr)"}
@@ -57,8 +54,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
     },
     "long": {
-        "name": "✈️ Larga Estancia (15+15+9)",
-        "desc": "2 viajes largos de 15 días y una escapada.",
+        "name": "✈️ Larga Estancia",
+        "desc": "15+15+9 días.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
             {"dur": 9,  "cred": 3, "label": "Escapada 9d (3 Cr)"}
@@ -66,8 +63,8 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
     },
     "micro": {
-        "name": "🐜 Hormiga (5x6 + 9)",
-        "desc": "5 bloques de 6 días y 1 de 9 días.",
+        "name": "🐜 Hormiga",
+        "desc": "5x6 días + 1x9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
             {"dur": 9, "cred": 3, "label": "Semana+ 9d (3 Cr)"}
@@ -75,14 +72,14 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 9, "target": 3} ]
     },
     "sniper": {
-        "name": "🎯 Francotirador (13 Días)",
+        "name": "🎯 Francotirador",
         "desc": "13 días sueltos de guardia.",
         "blocks": [ {"dur": 1, "cred": 1, "label": "Día Suelto (1 Cr)"} ],
         "auto_recipe": [{"dur": 1, "target": 1}] * 13
     },
     "balanced_plus": {
         "name": "🧩 Flexible (4x8 + 1x7)",
-        "desc": "4 periodos de 8 días y 1 de 7 días.",
+        "desc": "4 periodos de 8 días + 1 de 7 días.",
         "blocks": [
             {"dur": 8, "cred": 3, "label": "8d (3 Cr)"},
             {"dur": 8, "cred": 2, "label": "8d (2 Cr)"},
@@ -117,7 +114,7 @@ DEFAULT_ROSTER = [
 ]
 
 # ==============================================================================
-# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (MOTOR)
+# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (MOTOR LÓGICO)
 # ==============================================================================
 
 def load_data():
@@ -189,7 +186,6 @@ def get_night_transition_dates(night_periods):
         dates.add(end) 
     return dates
 
-# --- ESTA ES LA FUNCIÓN QUE DABA ERROR, AHORA ESTÁ AL PRINCIPIO ---
 def calculate_stats(roster_df, requests, year):
     base_sch, _ = generate_base_schedule(year)
     stats = {}
@@ -579,10 +575,11 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': fill = s_V; val = "V"
+                        elif st_val == 'V': 
+                            fill = s_V; val = "V"
                         elif st_val == 'V(R)': 
                             fill = s_VR; val = "v"
-                            if strategy_key == 'sniper': fill = s_V; val = "V"
+                            if strategy_key == 'sniper': fill = s_V; val = "V" 
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -619,30 +616,34 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     return out
 
 # ==============================================================================
-# INTERFAZ STREAMLIT (V46.3 - CEREBRO COMPARTIDO + ORDEN CORREGIDO)
+# INTERFAZ STREAMLIT
 # ==============================================================================
 
-st.title("🚒 Gestor V46.3: Cerebro Compartido")
-st.markdown("**Diseñado por Marcos Esteban Vives**")
+st.set_page_config(layout="wide", page_title="Gestor V46.4")
 
-with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
-    st.markdown("""
-    ### 🌐 CEREBRO COMPARTIDO
-    Ahora la App guarda los datos en el servidor. **Lo que tú guardes, lo verán tus compañeros.**
-    
-    ### 0️⃣ REVISA LA PLANTILLA
-    * Abre **"Plantilla"** (izquierda) y marca **SV** a los conductores.
-    
-    ### 1️⃣ CONFIGURACIÓN
-    * **Nocturnas:** Descarga plantilla y sube Excel.
-    
-    ### 2️⃣ ASIGNA VACACIONES
-    * **Modo Manual (Recomendado):** Elige una fecha y pulsa "Añadir". Se guardará al instante.
-    * **Modo Automático:** Sobrescribirá TODO el cuadrante compartido. Úsalo con precaución.
-    
-    ### 3️⃣ EL NIVELADOR
-    * Pulsa "🔄 Calcular Resultados" y ajusta los días. Los ajustes también se comparten.
-    """)
+def show_instructions():
+    with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
+        st.markdown("""
+        ### 🌐 CEREBRO COMPARTIDO
+        Ahora la App guarda los datos en el servidor. **Lo que tú guardes, lo verán tus compañeros.**
+        
+        ### 0️⃣ REVISA LA PLANTILLA
+        * Abre **"Plantilla"** (izquierda) y marca **SV** a los conductores.
+        
+        ### 1️⃣ CONFIGURACIÓN
+        * **Nocturnas:** Descarga plantilla y sube Excel.
+        
+        ### 2️⃣ ASIGNA VACACIONES
+        * **Modo Manual (Recomendado):** Elige una fecha y pulsa "Añadir". Se guardará al instante.
+        * **Modo Automático:** Sobrescribirá TODO el cuadrante compartido. Úsalo con precaución.
+        
+        ### 3️⃣ EL NIVELADOR
+        * Pulsa "🔄 Calcular Resultados" y ajusta los días. Los ajustes también se comparten.
+        """)
+
+st.title("🚒 Gestor V46.4: Cerebro Compartido")
+st.markdown("**Diseñado por Marcos Esteban Vives**")
+show_instructions()
 
 current_requests_df, current_adjustments = load_data()
 st.session_state.raw_requests_df = current_requests_df
@@ -650,9 +651,8 @@ st.session_state.forced_adjustments = current_adjustments
 if 'locked_result' not in st.session_state: st.session_state.locked_result = None
 
 current_requests = st.session_state.raw_requests_df.to_dict('records')
-stats = calculate_stats(edited_df, current_requests, year_val) # AHORA SÍ ESTÁ DEFINIDA
 
-# BARRA LATERAL (LOGIN)
+# BARRA LATERAL
 with st.sidebar:
     st.header("Configuración")
     year_val = st.number_input("Año", value=2026)
@@ -716,12 +716,15 @@ with st.sidebar:
         with st.spinner("Generando..."):
             new_reqs = auto_generate_schedule(edited_df, year_val, st.session_state.nights, strategy_key)
             df_new = pd.DataFrame(new_reqs)
-            save_data(df_new, [])
+            save_data(df_new, []) # Reset ajustes
             st.session_state.raw_requests_df = df_new
             st.session_state.forced_adjustments = []
             st.session_state.locked_result = None 
         st.success("¡Hecho! Base de datos actualizada.")
         st.rerun()
+
+# CALCULAR STATS AL FINAL PARA EVITAR ERROR
+stats = calculate_stats(edited_df, current_requests, year_val)
 
 # 3. DRAFT ROOM
 st.divider()
@@ -851,6 +854,7 @@ if st.button("🔄 Calcular/Actualizar Resultados", type="primary"):
         sch, adj, count, fill = validate_and_generate_final(edited_df, current_reqs, year_val, st.session_state.nights, adj_now, strategy_key)
         excel_io = create_final_excel(sch, edited_df, year_val, current_reqs, fill, count, st.session_state.nights, adj, strategy_key)
         work_days = get_work_days_count(sch)
+        
         st.session_state.locked_result = {
             "sch": sch, "adj": adj, "work_days": work_days, "excel": excel_io
         }
@@ -867,6 +871,7 @@ if st.session_state.locked_result:
     
     st.divider()
     col_poor, col_rich = st.columns(2)
+    
     with col_poor:
         st.subheader("📉 Falta Jornada (<121)")
         poor_people = [n for n, c in res['work_days'].items() if c < 121]
