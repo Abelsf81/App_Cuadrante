@@ -13,7 +13,12 @@ from itertools import groupby
 from operator import itemgetter
 from datetime import timedelta
 
-# --- CONSTANTES Y CONFIGURACIÓN ---
+# ==============================================================================
+# 1. CONFIGURACIÓN Y CONSTANTES
+# ==============================================================================
+
+st.set_page_config(layout="wide", page_title="Gestor V46.1")
+
 TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -90,7 +95,6 @@ STRATEGIES = {
     }
 }
 
-# Plantilla por defecto
 DEFAULT_ROSTER = [
     {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Subjefe",    "SV": False},
@@ -112,9 +116,9 @@ DEFAULT_ROSTER = [
     {"ID_Puesto": "Bombero C3",   "Nombre": "Bombero C3",   "Turno": "C", "Rol": "Bombero",    "SV": False},
 ]
 
-# -------------------------------------------------------------------
-# 1. GESTIÓN DE DATOS (PERSISTENCIA)
-# -------------------------------------------------------------------
+# ==============================================================================
+# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (MOTOR)
+# ==============================================================================
 
 def load_data():
     if os.path.exists(DB_FILE):
@@ -123,6 +127,7 @@ def load_data():
             if not df.empty:
                 df['Inicio'] = pd.to_datetime(df['Inicio']).dt.date
                 df['Fin'] = pd.to_datetime(df['Fin']).dt.date
+            else: df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
         except: df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
     else:
         df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
@@ -138,23 +143,6 @@ def load_data():
 def save_data(df_vacs, list_adj):
     df_vacs.to_csv(DB_FILE, index=False)
     pd.DataFrame(list_adj).to_csv(ADJ_FILE, index=False)
-
-# Carga Inicial
-current_requests_df, current_adjustments = load_data()
-
-# Inicializar variables de sesión SI NO EXISTEN
-if 'raw_requests_df' not in st.session_state:
-    st.session_state.raw_requests_df = current_requests_df
-if 'forced_adjustments' not in st.session_state:
-    st.session_state.forced_adjustments = current_adjustments
-if 'locked_result' not in st.session_state:
-    st.session_state.locked_result = None
-
-current_requests = st.session_state.raw_requests_df.to_dict('records')
-
-# -------------------------------------------------------------------
-# 2. LÓGICA BASE Y UTILIDADES (OPTIMIZADAS CON CACHÉ)
-# -------------------------------------------------------------------
 
 def get_short_id(name, role, turn):
     if role == "Jefe": return f"J{turn}"
@@ -176,7 +164,7 @@ def generate_night_template():
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
-@st.cache_data # <--- ESTO ACELERA LA APP
+@st.cache_data
 def generate_base_schedule(year):
     is_leap = calendar.isleap(year)
     total_days = 366 if is_leap else 365
@@ -194,7 +182,7 @@ def is_in_night_period(day_idx, year, night_periods):
         if start <= current_date <= end: return True
     return False
 
-@st.cache_data # <--- ESTO ACELERA LA APP
+@st.cache_data
 def get_night_transition_dates(night_periods):
     dates = set()
     for start, end in night_periods:
@@ -234,26 +222,18 @@ def get_clustered_dates(available_idxs, needed_count):
         else: break
     return sorted(selected)
 
-# -------------------------------------------------------------------
-# 3. MOTOR INTELIGENTE
-# -------------------------------------------------------------------
-
 def check_global_conflict_generic(start_idx, duration, person, occupation_map, base_sch, year, transition_dates):
     total_days = len(base_sch['A'])
     if start_idx + duration > total_days: return True
-
     for i in range(start_idx, start_idx + duration):
         d_obj = datetime.date(year, 1, 1) + timedelta(days=i)
         if d_obj in transition_dates:
             if base_sch[person['Turno']][i] == 'T': return True
-        
         occupants = occupation_map.get(i, [])
         if len(occupants) >= 2: return True
-        
         for occ in occupants:
             if occ['Turno'] == person['Turno']: return True
             if person['Rol'] != 'Bombero' and occ['Rol'] == person['Rol']: return True
-            
     return False
 
 def book_slot_gen(start_idx, duration, person, occupation_map):
@@ -342,6 +322,7 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                     })
                     break 
         
+        # RELLENO HIDRÁULICO
         if credits_got < 13:
             all_days_random = list(range(total_days))
             random.shuffle(all_days_random)
@@ -361,13 +342,9 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                             })
     return generated_requests
 
-# -------------------------------------------------------------------
-# 3. VISUALIZADOR HTML
-# -------------------------------------------------------------------
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
     
-    # Leyenda
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
         <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
@@ -377,46 +354,35 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
         <span style='border:2px solid red; padding:0px 5px; color:red;'>Fin Noche</span>
     </div>
     """
-
     html += "<div style='display:flex; margin-bottom:2px;'><div style='width:30px;'></div>"
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
     html += "</div>"
-
     for m_idx, mes in enumerate(MESES):
         m_num = m_idx + 1
         days_in_month = calendar.monthrange(year, m_num)[1]
         html += f"<div style='display:flex; margin-bottom:2px;'><div style='width:30px; font-weight:bold;'>{mes}</div>"
-        
         for d in range(1, 32):
             if d <= days_in_month:
                 dt = datetime.date(year, m_num, d)
                 d_idx = dt.timetuple().tm_yday - 1
-                
                 state = base_sch[team][d_idx]
                 final_val = state
                 if custom_schedule: final_val = custom_schedule[d_idx]
-
                 bg_color = "#eee"; text_color = "#ccc"; border = "1px solid #fff"
-                
-                # 1. Lógica base
-                if state == 'T': 
+                if final_val == 'T': 
                     bg_color = "#d4edda"; text_color = "#155724"
                     if is_in_night_period(d_idx, year, night_periods):
-                        bg_color = "#1E7E34"; text_color = "white" # Verde Oscuro Noche
-                
-                # 2. Lógica de Vacaciones (Sobreescribe)
-                if final_val == 'V':
-                    bg_color = "#FFC000"; text_color = "#000" # Oro
+                        bg_color = "#1E7E34"; text_color = "white"
+                elif final_val == 'V':
+                    bg_color = "#FFC000"; text_color = "#000"
                 elif final_val == 'V(R)':
-                    bg_color = "#FFFFE0"; text_color = "#555" # Crema
+                    bg_color = "#FFFFE0"; text_color = "#555"
                 elif final_val == 'T+':
                     bg_color = "#ADD8E6"; text_color = "#000"
                 elif final_val == 'L*':
                     bg_color = "#E6E6FA"; text_color = "#000"
-                
                 if dt in get_night_transition_dates(night_periods): border = "2px solid red"
-
                 html += f"<div style='width:20px; background-color:{bg_color}; color:{text_color}; text-align:center; border:{border}; border-radius:2px;'>{state[0]}</div>"
             else:
                 html += "<div style='width:20px;'></div>"
@@ -424,9 +390,6 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
     html += "</div>"
     return html
 
-# -------------------------------------------------------------------
-# 4. GENERACIÓN FINAL Y COBERTURA
-# -------------------------------------------------------------------
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
@@ -579,8 +542,8 @@ def find_adjustment_options(person_name, action_type, roster_df, year, night_per
 
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log, strategy_key="standard"):
     wb = Workbook()
-    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000") # Oro
-    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE") # Crema
+    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000") # ORO
+    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE") # CREMA
     s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
     s_Extra = PatternFill("solid", fgColor="ADD8E6"); s_Free = PatternFill("solid", fgColor="E6E6FA")
     font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
@@ -615,7 +578,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         dt = datetime.date(year, m_idx+1, d); d_y = dt.timetuple().tm_yday - 1
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
-                        
                         if st_val == 'T': fill = s_T; val = "T"
                         elif st_val == 'V': 
                             fill = s_V; val = "V"
@@ -629,7 +591,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                             val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
                         elif st_val == 'T+': fill = s_Extra; val = "T+"
                         elif st_val == 'L*': fill = s_Free; val = "L"
-                        
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -658,73 +619,45 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
-# -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V46.0 - FINAL CON CACHÉ Y NUBE)
-# -------------------------------------------------------------------
+# ==============================================================================
+# INTERFAZ STREAMLIT
+# ==============================================================================
 
-st.set_page_config(layout="wide", page_title="Gestor V46.0")
-
-def show_instructions():
-    with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
-        st.markdown("""
-        ### 🌐 CEREBRO COMPARTIDO
-        Ahora la App guarda los datos en el servidor. **Lo que tú guardes, lo verán tus compañeros.**
-        
-        ### 0️⃣ REVISA LA PLANTILLA
-        * Abre **"Plantilla"** (izquierda) y marca **SV** a los conductores.
-        
-        ### 1️⃣ CONFIGURACIÓN
-        * **Nocturnas:** Descarga plantilla y sube Excel.
-        
-        ### 2️⃣ ASIGNA VACACIONES
-        * **Modo Manual (Recomendado):** Elige una fecha y pulsa "Añadir". Se guardará al instante.
-        * **Modo Automático:** Sobrescribirá TODO el cuadrante compartido. Úsalo con precaución.
-        
-        ### 3️⃣ EL NIVELADOR
-        * Pulsa "🔄 Calcular Resultados" y ajusta los días. Los ajustes también se comparten.
-        """)
-
-st.title("🚒 Gestor V46.0: Cerebro Compartido y Optimizado")
+st.title("🚒 Gestor V46.1: Cerebro Compartido")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
-show_instructions()
 
-# 1. GESTIÓN DE DATOS
-def load_data():
-    if os.path.exists(DB_FILE):
-        try:
-            df = pd.read_csv(DB_FILE)
-            if not df.empty:
-                df['Inicio'] = pd.to_datetime(df['Inicio']).dt.date
-                df['Fin'] = pd.to_datetime(df['Fin']).dt.date
-        except: df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
-    else:
-        df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
+with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
+    st.markdown("""
+    ### 🌐 CEREBRO COMPARTIDO
+    Ahora la App guarda los datos en el servidor. **Lo que tú guardes, lo verán tus compañeros.**
     
-    if os.path.exists(ADJ_FILE):
-        try:
-            adj_data = pd.read_csv(ADJ_FILE).to_dict('records')
-        except: adj_data = []
-    else:
-        adj_data = []
-    return df, adj_data
+    ### 0️⃣ REVISA LA PLANTILLA
+    * Abre **"Plantilla"** (izquierda) y marca **SV** a los conductores.
+    
+    ### 1️⃣ CONFIGURACIÓN
+    * **Nocturnas:** Descarga plantilla y sube Excel.
+    
+    ### 2️⃣ ASIGNA VACACIONES
+    * **Modo Manual (Recomendado):** Elige una fecha y pulsa "Añadir". Se guardará al instante.
+    * **Modo Automático:** Sobrescribirá TODO el cuadrante compartido. Úsalo con precaución.
+    
+    ### 3️⃣ EL NIVELADOR
+    * Pulsa "🔄 Calcular Resultados" y ajusta los días. Los ajustes también se comparten.
+    """)
 
-def save_data(df_vacs, list_adj):
-    df_vacs.to_csv(DB_FILE, index=False)
-    pd.DataFrame(list_adj).to_csv(ADJ_FILE, index=False)
-
-# Carga Inicial
+# CARGA INICIAL DE DATOS
 current_requests_df, current_adjustments = load_data()
 st.session_state.raw_requests_df = current_requests_df
 st.session_state.forced_adjustments = current_adjustments
-
-# Inicializar estado
-if 'locked_result' not in st.session_state:
-    st.session_state.locked_result = None
+if 'locked_result' not in st.session_state: st.session_state.locked_result = None
 
 current_requests = st.session_state.raw_requests_df.to_dict('records')
+
+# CALCULAR STATS (AHORA SÍ ESTÁ DEFINIDA)
 stats = calculate_stats(edited_df, current_requests, year_val)
 
-# 2. CONFIGURACIÓN
+
+# BARRA LATERAL
 with st.sidebar:
     st.header("Configuración")
     year_val = st.number_input("Año", value=2026)
@@ -846,8 +779,6 @@ with c_main:
         else:
             month_range = st.select_slider("📅 Filtrar Meses:", options=MESES, value=(MESES[0], MESES[-1]))
             st.info(f"🔍 Buscando fichas disponibles...")
-            
-            # IMPORTANTE: Aquí pasamos current_requests actualizado desde el CSV
             options = get_available_blocks_for_person(selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range, strategy_key)
             block_defs = STRATEGIES[strategy_key]['blocks']
             tabs = st.tabs([b['label'] for b in block_defs])
