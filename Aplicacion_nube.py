@@ -82,7 +82,7 @@ STRATEGIES = {
     },
     "balanced_plus": {
         "name": "🧩 Flexible (4x8 + 1x7)",
-        "desc": "4 de 8 días + 1 de 7 días.",
+        "desc": "4 periodos de 8 días + 1 de 7 días.",
         "blocks": [
             {"dur": 8, "cred": 3, "label": "8d (3 Cr)"},
             {"dur": 8, "cred": 2, "label": "8d (2 Cr)"},
@@ -189,7 +189,7 @@ def get_night_transition_dates(night_periods):
         dates.add(end) 
     return dates
 
-# LA FUNCIÓN CALCULATE_STATS AHORA ESTÁ AQUÍ, ANTES DE SER LLAMADA
+# ESTA FUNCIÓN AHORA ESTÁ ANTES DE SER LLAMADA
 def calculate_stats(roster_df, requests, year):
     base_sch, _ = generate_base_schedule(year)
     stats = {}
@@ -357,7 +357,6 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
     html += "</div>"
-
     for m_idx, mes in enumerate(MESES):
         m_num = m_idx + 1
         days_in_month = calendar.monthrange(year, m_num)[1]
@@ -366,11 +365,9 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
             if d <= days_in_month:
                 dt = datetime.date(year, m_num, d)
                 d_idx = dt.timetuple().tm_yday - 1
-                
                 state = base_sch[team][d_idx]
                 final_val = state
                 if custom_schedule: final_val = custom_schedule[d_idx]
-
                 bg_color = "#eee"; text_color = "#ccc"; border = "1px solid #fff"
                 if final_val == 'T': 
                     bg_color = "#d4edda"; text_color = "#155724"
@@ -581,11 +578,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': 
-                            fill = s_V; val = "V"
+                        elif st_val == 'V': fill = s_V; val = "V"
                         elif st_val == 'V(R)': 
                             fill = s_VR; val = "v"
-                            if strategy_key == 'sniper': fill = s_V; val = "V"
+                            if strategy_key == 'sniper': fill = s_V; val = "V" 
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -625,7 +621,7 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
 # INTERFAZ STREAMLIT
 # ==============================================================================
 
-st.title("🚒 Gestor V46.2: Cerebro Compartido")
+st.title("🚒 Gestor V46.3: Cerebro Compartido")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
 
 with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
@@ -653,9 +649,6 @@ st.session_state.forced_adjustments = current_adjustments
 if 'locked_result' not in st.session_state: st.session_state.locked_result = None
 
 current_requests = st.session_state.raw_requests_df.to_dict('records')
-
-# CALCULAR STATS (AHORA SÍ, AL FINAL)
-stats = calculate_stats(edited_df, current_requests, year_val)
 
 # BARRA LATERAL
 with st.sidebar:
@@ -727,6 +720,9 @@ with st.sidebar:
             st.session_state.locked_result = None 
         st.success("¡Hecho! Base de datos actualizada.")
         st.rerun()
+
+# CALCULAR STATS (AL FINAL, TRAS DEFINIR TODO)
+stats = calculate_stats(edited_df, current_requests, year_val)
 
 # 3. DRAFT ROOM
 st.divider()
