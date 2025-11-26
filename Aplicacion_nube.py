@@ -13,14 +13,19 @@ from itertools import groupby
 from operator import itemgetter
 from datetime import timedelta
 
-# --- CONSTANTES Y CONFIGURACIÓN ---
+# ==============================================================================
+# 1. CONFIGURACIÓN Y CONSTANTES
+# ==============================================================================
+
+st.set_page_config(layout="wide", page_title="Gestor V45.1")
+
 TEAMS = ['A', 'B', 'C']
 ROLES = ["Jefe", "Subjefe", "Conductor", "Bombero"] 
 MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
 DB_FILE = "vacaciones_db.csv"
 ADJ_FILE = "ajustes_db.csv"
 
-# --- ESTRATEGIAS DE VACACIONES ---
+# --- ESTRATEGIAS ---
 STRATEGIES = {
     "standard": {
         "name": "🛡️ Estándar (4 Bloques)",
@@ -33,7 +38,7 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 10, "target": 4}, {"dur": 10, "target": 3}, {"dur": 10, "target": 3}, {"dur": 9, "target": 3} ]
     },
     "safe": {
-        "name": "🔢 Matemática Pura (4 Bloques)",
+        "name": "🔢 Matemática Pura",
         "desc": "12+12+9+6 días. Indestructible.",
         "blocks": [
             {"dur": 12, "cred": 4, "label": "Largo 12d (4 Cr)"},
@@ -43,7 +48,7 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 12, "target": 4}, {"dur": 12, "target": 4}, {"dur": 9, "target": 3}, {"dur": 6, "target": 2} ]
     },
     "balanced": {
-        "name": "⚖️ Tridente (3 Bloques)",
+        "name": "⚖️ Tridente",
         "desc": "13+13+13 días.",
         "blocks": [
             {"dur": 13, "cred": 5, "label": "Bloque 13d (5 Cr)"},
@@ -52,7 +57,7 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 13, "target": 5}, {"dur": 13, "target": 4}, {"dur": 13, "target": 4} ]
     },
     "long": {
-        "name": "✈️ Larga Estancia (3 Bloques)",
+        "name": "✈️ Larga Estancia",
         "desc": "15+15+9 días.",
         "blocks": [
             {"dur": 15, "cred": 5, "label": "Gran Viaje 15d (5 Cr)"},
@@ -61,7 +66,7 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 15, "target": 5}, {"dur": 15, "target": 5}, {"dur": 9, "target": 3} ]
     },
     "micro": {
-        "name": "🐜 Hormiga (6 Bloques)",
+        "name": "🐜 Hormiga",
         "desc": "5x6 días + 1x9 días.",
         "blocks": [
             {"dur": 6, "cred": 2, "label": "Semana 6d (2 Cr)"},
@@ -70,14 +75,14 @@ STRATEGIES = {
         "auto_recipe": [ {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 6, "target": 2}, {"dur": 9, "target": 3} ]
     },
     "sniper": {
-        "name": "🎯 Francotirador (13 Días)",
+        "name": "🎯 Francotirador",
         "desc": "13 días sueltos de guardia.",
         "blocks": [ {"dur": 1, "cred": 1, "label": "Día Suelto (1 Cr)"} ],
         "auto_recipe": [{"dur": 1, "target": 1}] * 13
     },
     "balanced_plus": {
         "name": "🧩 Flexible (4x8 + 1x7)",
-        "desc": "4 periodos de 8 días + 1 de 7 días.",
+        "desc": "4 de 8 días + 1 de 7 días.",
         "blocks": [
             {"dur": 8, "cred": 3, "label": "8d (3 Cr)"},
             {"dur": 8, "cred": 2, "label": "8d (2 Cr)"},
@@ -90,7 +95,6 @@ STRATEGIES = {
     }
 }
 
-# Plantilla por defecto
 DEFAULT_ROSTER = [
     {"ID_Puesto": "Jefe A",       "Nombre": "Jefe A",       "Turno": "A", "Rol": "Jefe",       "SV": False},
     {"ID_Puesto": "Subjefe A",    "Nombre": "Subjefe A",    "Turno": "A", "Rol": "Subjefe",    "SV": False},
@@ -112,62 +116,32 @@ DEFAULT_ROSTER = [
     {"ID_Puesto": "Bombero C3",   "Nombre": "Bombero C3",   "Turno": "C", "Rol": "Bombero",    "SV": False},
 ]
 
-# -------------------------------------------------------------------
-# 1. GESTIÓN DE DATOS (PERSISTENCIA SEGURA)
-# -------------------------------------------------------------------
+# ==============================================================================
+# 2. DEFINICIÓN DE TODAS LAS FUNCIONES (ANTES DE USARLAS)
+# ==============================================================================
 
 def load_data():
-    # Cargar Vacaciones (DB_FILE)
     if os.path.exists(DB_FILE):
         try:
             df = pd.read_csv(DB_FILE)
-            if df.empty:
-                df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
-            else:
+            if not df.empty:
                 df['Inicio'] = pd.to_datetime(df['Inicio']).dt.date
                 df['Fin'] = pd.to_datetime(df['Fin']).dt.date
-        except Exception:
-            # Si el archivo está corrupto o vacío, reiniciar
-            df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
+        except: df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
     else:
         df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
     
-    # Cargar Ajustes (ADJ_FILE)
     if os.path.exists(ADJ_FILE):
         try:
-            adj_data = pd.read_csv(ADJ_FILE)
-            if adj_data.empty:
-                adj_list = []
-            else:
-                adj_list = adj_data.to_dict('records')
-        except Exception:
-            # Si falla al leer (EmptyDataError), devolver lista vacía
-            adj_list = []
+            adj_data = pd.read_csv(ADJ_FILE).to_dict('records')
+        except: adj_data = []
     else:
-        adj_list = []
-        
-    return df, adj_list
+        adj_data = []
+    return df, adj_data
 
 def save_data(df_vacs, list_adj):
     df_vacs.to_csv(DB_FILE, index=False)
     pd.DataFrame(list_adj).to_csv(ADJ_FILE, index=False)
-
-# Carga Inicial
-current_requests_df, current_adjustments = load_data()
-
-# Inicializar variables de sesión SI NO EXISTEN
-if 'raw_requests_df' not in st.session_state:
-    st.session_state.raw_requests_df = current_requests_df
-if 'forced_adjustments' not in st.session_state:
-    st.session_state.forced_adjustments = current_adjustments
-if 'locked_result' not in st.session_state:
-    st.session_state.locked_result = None
-
-current_requests = st.session_state.raw_requests_df.to_dict('records')
-
-# -------------------------------------------------------------------
-# 2. LÓGICA BASE Y UTILIDADES
-# -------------------------------------------------------------------
 
 def get_short_id(name, role, turn):
     if role == "Jefe": return f"J{turn}"
@@ -244,10 +218,6 @@ def get_clustered_dates(available_idxs, needed_count):
             selected.extend(group[:take])
         else: break
     return sorted(selected)
-
-# -------------------------------------------------------------------
-# 3. MOTOR INTELIGENTE
-# -------------------------------------------------------------------
 
 def check_global_conflict_generic(start_idx, duration, person, occupation_map, base_sch, year, transition_dates):
     total_days = len(base_sch['A'])
@@ -349,7 +319,6 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                     })
                     break 
         
-        # RELLENO HIDRÁULICO
         if credits_got < 13:
             all_days_random = list(range(total_days))
             random.shuffle(all_days_random)
@@ -369,22 +338,17 @@ def auto_generate_schedule(roster_df, year, night_periods, strategy_key):
                             })
     return generated_requests
 
-# -------------------------------------------------------------------
-# 4. VISUALIZADOR HTML
-# -------------------------------------------------------------------
 def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=None):
     html = f"<div style='font-family:monospace; font-size:10px;'>"
-    
     html += """
     <div style='display:flex; gap:10px; margin-bottom:5px; font-size:11px; font-weight:bold;'>
         <span style='background:#d4edda; color:#155724; padding:2px 5px; border:1px solid #c3e6cb;'>T (Guardia)</span>
         <span style='background:#FFC000; color:#000; padding:2px 5px; border:1px solid #DAA520;'>V (Pedido)</span>
         <span style='background:#FFFFE0; color:#555; padding:2px 5px; border:1px solid #EEE8AA;'>V(R) (Relleno)</span>
-        <span style='background:#1E7E34; color:white; padding:2px 5px;'>T (Noche)</span>
+        <span style='background:#28a745; color:white; padding:2px 5px;'>T (Noche)</span>
         <span style='border:2px solid red; padding:0px 5px; color:red;'>Fin Noche</span>
     </div>
     """
-
     html += "<div style='display:flex; margin-bottom:2px;'><div style='width:30px;'></div>"
     for d in range(1, 32):
         html += f"<div style='width:20px; text-align:center; color:#888;'>{d}</div>"
@@ -394,36 +358,28 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
         m_num = m_idx + 1
         days_in_month = calendar.monthrange(year, m_num)[1]
         html += f"<div style='display:flex; margin-bottom:2px;'><div style='width:30px; font-weight:bold;'>{mes}</div>"
-        
         for d in range(1, 32):
             if d <= days_in_month:
                 dt = datetime.date(year, m_num, d)
                 d_idx = dt.timetuple().tm_yday - 1
-                
                 state = base_sch[team][d_idx]
                 final_val = state
                 if custom_schedule: final_val = custom_schedule[d_idx]
 
                 bg_color = "#eee"; text_color = "#ccc"; border = "1px solid #fff"
-                
-                # Logica base
-                if state == 'T': 
+                if final_val == 'T': 
                     bg_color = "#d4edda"; text_color = "#155724"
                     if is_in_night_period(d_idx, year, night_periods):
-                        bg_color = "#1E7E34"; text_color = "white" # VERDE OSCURO INTENSO
-                
-                # Logica vacaciones sobreescribe
-                if final_val == 'V':
-                    bg_color = "#FFC000"; text_color = "#000" # Oro
+                        bg_color = "#28a745"; text_color = "white"
+                elif final_val == 'V':
+                    bg_color = "#FFC000"; text_color = "#000"
                 elif final_val == 'V(R)':
-                    bg_color = "#FFFFE0"; text_color = "#555" # Crema
+                    bg_color = "#FFFFE0"; text_color = "#555"
                 elif final_val == 'T+':
                     bg_color = "#ADD8E6"; text_color = "#000"
                 elif final_val == 'L*':
                     bg_color = "#E6E6FA"; text_color = "#000"
-                
                 if dt in get_night_transition_dates(night_periods): border = "2px solid red"
-
                 html += f"<div style='width:20px; background-color:{bg_color}; color:{text_color}; text-align:center; border:{border}; border-radius:2px;'>{state[0]}</div>"
             else:
                 html += "<div style='width:20px;'></div>"
@@ -431,9 +387,6 @@ def render_annual_calendar(year, team, base_sch, night_periods, custom_schedule=
     html += "</div>"
     return html
 
-# -------------------------------------------------------------------
-# 5. GENERACIÓN FINAL Y COBERTURA
-# -------------------------------------------------------------------
 def get_candidates(person_missing, roster_df, day_idx, current_schedule, year, night_periods, adjustments_log_current_day=None):
     candidates = []
     missing_role = person_missing['Rol']
@@ -527,16 +480,13 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
 
     fill_log = {}
     for name in roster_df['Nombre']:
-        # ESTRATEGIA SNIPER: Relleno especial Sándwich
         if strategy_key == 'sniper':
             sched = final_schedule[name]
             for d in range(total_days - 2):
                 if sched[d] == 'V':
-                    # Si los siguientes son L, los marcamos como V(R)
                     if sched[d+1] == 'L': final_schedule[name][d+1] = 'V(R)'
                     if sched[d+2] == 'L': final_schedule[name][d+2] = 'V(R)'
         else:
-            # ESTRATEGIAS DE BLOQUES: Relleno estándar
             current = natural_days_count.get(name, 0)
             needed = 39 - current
             if needed > 0:
@@ -545,7 +495,6 @@ def validate_and_generate_final(roster_df, requests, year, night_periods, forced
                     fill_idxs = get_clustered_dates(available_idx, needed)
                     for idx in fill_idxs:
                         final_schedule[name][idx] = 'V(R)'
-
     return final_schedule, adjustments_log, person_coverage_counters, fill_log
 
 def get_work_days_count(final_schedule):
@@ -566,7 +515,6 @@ def find_adjustment_options(person_name, action_type, roster_df, year, night_per
     for sched in current_schedule.values():
         for i, s in enumerate(sched):
             if 'V' in s: vacation_counts[i] += 1
-
     for d in range(total_days):
         current_status = current_schedule[person_name][d]
         if action_type == 'add':
@@ -589,8 +537,8 @@ def find_adjustment_options(person_name, action_type, roster_df, year, night_per
 
 def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, night_periods, adjustments_log, strategy_key="standard"):
     wb = Workbook()
-    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000") # ORO
-    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE") # CREMA
+    s_T = PatternFill("solid", fgColor="C6EFCE"); s_V = PatternFill("solid", fgColor="FFC000")
+    s_VR = PatternFill("solid", fgColor="FFFFE0"); s_Cov = PatternFill("solid", fgColor="FFC7CE")
     s_L = PatternFill("solid", fgColor="F2F2F2"); s_Night = PatternFill("solid", fgColor="A6A6A6")
     s_Extra = PatternFill("solid", fgColor="ADD8E6"); s_Free = PatternFill("solid", fgColor="E6E6FA")
     font_bold = Font(bold=True); font_red = Font(color="9C0006", bold=True)
@@ -625,10 +573,10 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                         dt = datetime.date(year, m_idx+1, d); d_y = dt.timetuple().tm_yday - 1
                         st_val = schedule[nm][d_y]
                         fill = s_L; val = ""
-                        
                         if st_val == 'T': fill = s_T; val = "T"
-                        elif st_val == 'V': fill = s_V; val = "V" # ORO
-                        elif st_val == 'V(R)': fill = s_VR; val = "v" # CREMA
+                        elif st_val == 'V': fill = s_V; val = "V"
+                        elif st_val == 'V(R)': fill = s_VR; val = "v"
+                        elif st_val == 'V(L)': fill = s_VR; val = "v"
                         elif st_val.startswith('T*'): 
                             fill = s_Cov; cell.font = font_red
                             raw_name = st_val.split('(')[1][:-1]
@@ -636,7 +584,6 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
                             val = get_short_id(cov_p['Nombre'], cov_p['Rol'], cov_p['Turno'])
                         elif st_val == 'T+': fill = s_Extra; val = "T+"
                         elif st_val == 'L*': fill = s_Free; val = "L"
-                        
                         if is_in_night_period(d_y, year, night_periods): fill = s_Night
                         cell.fill = fill; cell.value = val
                     else: cell.fill = PatternFill("solid", fgColor="808080")
@@ -665,73 +612,41 @@ def create_final_excel(schedule, roster_df, year, requests, fill_log, counters, 
     out = io.BytesIO(); wb.save(out); out.seek(0)
     return out
 
-# -------------------------------------------------------------------
-# INTERFAZ STREAMLIT (V45.0)
-# -------------------------------------------------------------------
+# ==============================================================================
+# MAIN EXECUTION
+# ==============================================================================
 
-st.set_page_config(layout="wide", page_title="Gestor V45.0")
-
-def show_instructions():
-    with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
-        st.markdown("""
-        ### 🌐 CEREBRO COMPARTIDO
-        Ahora la App guarda los datos en el servidor. **Lo que tú guardes, lo verán tus compañeros.**
-        
-        ### 0️⃣ REVISA LA PLANTILLA
-        * Abre **"Plantilla"** (izquierda) y marca **SV** a los conductores.
-        
-        ### 1️⃣ CONFIGURACIÓN
-        * **Nocturnas:** Descarga plantilla y sube Excel.
-        
-        ### 2️⃣ ASIGNA VACACIONES
-        * **Modo Manual (Recomendado):** Elige una fecha y pulsa "Añadir". Se guardará al instante.
-        * **Modo Automático:** Sobrescribirá TODO el cuadrante compartido. Úsalo con precaución.
-        
-        ### 3️⃣ EL NIVELADOR
-        * Pulsa "🔄 Calcular Resultados" y ajusta los días. Los ajustes también se comparten.
-        """)
-
-st.title("🚒 Gestor V45.0: Cerebro Compartido")
+st.title("🚒 Gestor V45.1: Cerebro Compartido")
 st.markdown("**Diseñado por Marcos Esteban Vives**")
-show_instructions()
 
-# 1. GESTIÓN DE DATOS
-def load_data():
-    if os.path.exists(DB_FILE):
-        try:
-            df = pd.read_csv(DB_FILE)
-            if not df.empty:
-                df['Inicio'] = pd.to_datetime(df['Inicio']).dt.date
-                df['Fin'] = pd.to_datetime(df['Fin']).dt.date
-        except: df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
-    else:
-        df = pd.DataFrame(columns=["Nombre", "Inicio", "Fin"])
+with st.expander("📘 MANUAL DE USUARIO (LÉEME)", expanded=True):
+    st.markdown("""
+    ### 🌐 CEREBRO COMPARTIDO
+    Ahora la App guarda los datos en el servidor. **Lo que tú guardes, lo verán tus compañeros.**
     
-    if os.path.exists(ADJ_FILE):
-        try:
-            adj_data = pd.read_csv(ADJ_FILE).to_dict('records')
-        except: adj_data = []
-    else:
-        adj_data = []
-    return df, adj_data
+    ### 0️⃣ REVISA LA PLANTILLA
+    * Abre **"Plantilla"** (izquierda) y marca **SV** a los conductores.
+    
+    ### 1️⃣ CONFIGURACIÓN
+    * **Nocturnas:** Descarga plantilla y sube Excel.
+    
+    ### 2️⃣ ASIGNA VACACIONES
+    * **Modo Manual (Recomendado):** Elige una fecha y pulsa "Añadir". Se guardará al instante.
+    * **Modo Automático:** Sobrescribirá TODO el cuadrante compartido. Úsalo con precaución.
+    
+    ### 3️⃣ EL NIVELADOR
+    * Pulsa "🔄 Calcular Resultados" y ajusta los días. Los ajustes también se comparten.
+    """)
 
-def save_data(df_vacs, list_adj):
-    df_vacs.to_csv(DB_FILE, index=False)
-    pd.DataFrame(list_adj).to_csv(ADJ_FILE, index=False)
-
-# Carga Inicial
 current_requests_df, current_adjustments = load_data()
 st.session_state.raw_requests_df = current_requests_df
 st.session_state.forced_adjustments = current_adjustments
-
-# Inicializar estado
-if 'locked_result' not in st.session_state:
-    st.session_state.locked_result = None
+if 'locked_result' not in st.session_state: st.session_state.locked_result = None
 
 current_requests = st.session_state.raw_requests_df.to_dict('records')
 stats = calculate_stats(edited_df, current_requests, year_val)
 
-# 2. CONFIGURACIÓN
+# BARRA LATERAL
 with st.sidebar:
     st.header("Configuración")
     year_val = st.number_input("Año", value=2026)
@@ -802,7 +717,7 @@ with st.sidebar:
         st.success("¡Hecho! Base de datos actualizada.")
         st.rerun()
 
-# 3. DRAFT ROOM
+# VISUAL
 st.divider()
 c_main, c_vis = st.columns([1, 2])
 
@@ -853,7 +768,6 @@ with c_main:
         else:
             month_range = st.select_slider("📅 Filtrar Meses:", options=MESES, value=(MESES[0], MESES[-1]))
             st.info(f"🔍 Buscando fichas disponibles...")
-            
             options = get_available_blocks_for_person(selected_person, edited_df, current_requests, year_val, st.session_state.nights, month_range, strategy_key)
             block_defs = STRATEGIES[strategy_key]['blocks']
             tabs = st.tabs([b['label'] for b in block_defs])
@@ -906,9 +820,9 @@ with c_vis:
             s = r['Inicio'].timetuple().tm_yday - 1
             e = r['Fin'].timetuple().tm_yday - 1
             for d in range(s, e+1):
-                if temp_sch[d] == 'T': temp_sch[d] = 'V' # Amarillo Fuerte
-                else: temp_sch[d] = 'V(R)' # Crema Suave
-
+                if temp_sch[d] == 'T': temp_sch[d] = 'V'
+                else: temp_sch[d] = 'V(L)'
+        
         if strategy_key == 'sniper':
              for d in range(len(temp_sch) - 2):
                  if temp_sch[d] == 'V' and temp_sch[d+1] == 'L': temp_sch[d+1] = 'V(R)'
@@ -920,7 +834,6 @@ with c_vis:
         base_sch, _ = generate_base_schedule(year_val)
         st.markdown(render_annual_calendar(year_val, 'A', base_sch, st.session_state.nights), unsafe_allow_html=True)
 
-# 4. PANEL DE AJUSTE FINO
 st.divider()
 st.header("⚙️ Ajuste Fino y Descarga")
 
@@ -938,7 +851,6 @@ if st.button("🔄 Calcular/Actualizar Resultados", type="primary"):
 
 if st.session_state.locked_result:
     res = st.session_state.locked_result
-    
     cols_eq = st.columns(3)
     for i, (name, count) in enumerate(res['work_days'].items()):
         with cols_eq[i % 3]:
@@ -964,7 +876,6 @@ if st.session_state.locked_result:
                         st.session_state.forced_adjustments = adj_now
                         st.session_state.locked_result = None 
                         st.rerun()
-
     with col_rich:
         st.subheader("📈 Sobra Jornada (>123)")
         rich_people = [n for n, c in res['work_days'].items() if c > 123]
@@ -984,13 +895,7 @@ if st.session_state.locked_result:
                         st.rerun()
 
     st.divider()
-    st.download_button(
-        "📥 Descargar Cuadrante Final",
-        data=res['excel'],
-        file_name=f"Cuadrante_Final_{year_val}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary"
-    )
+    st.download_button("📥 Descargar Cuadrante Final", data=res['excel'], file_name=f"Cuadrante_Final_{year_val}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
     st.markdown("**Diseñado por Marcos Esteban Vives**")
     st.caption("Asistente de programación. Esta información tiene un carácter meramente informativo. Para obtener asesoramiento o diagnóstico médicos, consulta a un profesional.")
 else:
